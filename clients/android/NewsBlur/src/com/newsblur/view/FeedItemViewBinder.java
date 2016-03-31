@@ -12,7 +12,6 @@ import android.widget.TextView;
 
 import com.newsblur.R;
 import com.newsblur.database.DatabaseConstants;
-import com.newsblur.domain.Story;
 import com.newsblur.util.StoryUtils;
 
 import java.util.Date;
@@ -49,7 +48,7 @@ public class FeedItemViewBinder implements ViewBinder {
 				((TextView) view).setText(cursor.getString(columnIndex).toUpperCase());
 			}
 			return true;
-		} else if (TextUtils.equals(columnName, DatabaseConstants.SUM_STORY_TOTAL)) {
+		} else if (TextUtils.equals(columnName, DatabaseConstants.STORY_INTELLIGENCE_TOTAL)) {
             int score = cursor.getInt(columnIndex);
 			Drawable icon;
             if (score > 0) {
@@ -61,8 +60,6 @@ public class FeedItemViewBinder implements ViewBinder {
 			}
             icon.mutate().setAlpha(hasBeenRead == 0 ? 255 : 127);
             view.setBackgroundDrawable(icon);
-			
-			((TextView) view).setText("");
 			return true;
 		} else if (TextUtils.equals(columnName, DatabaseConstants.STORY_TITLE)) {
             ((TextView) view).setText(Html.fromHtml(cursor.getString(columnIndex)));

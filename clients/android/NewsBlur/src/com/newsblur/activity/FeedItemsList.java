@@ -11,12 +11,9 @@ import com.newsblur.R;
 import com.newsblur.domain.Feed;
 import com.newsblur.fragment.DeleteFeedFragment;
 import com.newsblur.fragment.FeedItemListFragment;
-import com.newsblur.service.NBSyncService;
 import com.newsblur.util.DefaultFeedView;
-import com.newsblur.util.FeedSet;
 import com.newsblur.util.PrefsUtils;
 import com.newsblur.util.ReadFilter;
-import com.newsblur.util.StoryOrder;
 import com.newsblur.util.UIUtils;
 
 public class FeedItemsList extends ItemsList {
@@ -37,7 +34,7 @@ public class FeedItemsList extends ItemsList {
 
 		itemListFragment = (FeedItemListFragment) fragmentManager.findFragmentByTag(FeedItemListFragment.class.getName());
 		if (itemListFragment == null) {
-			itemListFragment = FeedItemListFragment.newInstance(feed, currentState, getDefaultFeedView());
+			itemListFragment = FeedItemListFragment.newInstance(feed);
 			itemListFragment.setRetainInstance(true);
 			FragmentTransaction listTransaction = fragmentManager.beginTransaction();
 			listTransaction.add(R.id.activity_itemlist_container, itemListFragment, FeedItemListFragment.class.getName());
@@ -45,11 +42,6 @@ public class FeedItemsList extends ItemsList {
 		}
 	}
 
-    @Override
-    protected FeedSet createFeedSet() {
-        return FeedSet.singleFeed(feed.feedId);
-    }
-	
 	public void deleteFeed() {
 		DialogFragment deleteFeedFragment = DeleteFeedFragment.newInstance(feed, folderName);
 		deleteFeedFragment.show(fragmentManager, "dialog");
@@ -78,16 +70,6 @@ public class FeedItemsList extends ItemsList {
 	}
 
     @Override
-    public StoryOrder getStoryOrder() {
-        return PrefsUtils.getStoryOrderForFeed(this, feed.feedId);
-    }
-
-    @Override
-    public void updateStoryOrderPreference(StoryOrder newValue) {
-        PrefsUtils.setStoryOrderForFeed(this, feed.feedId, newValue);
-    }
-    
-    @Override
     protected void updateReadFilterPreference(ReadFilter newValue) {
         PrefsUtils.setReadFilterForFeed(this, feed.feedId, newValue);
     }
@@ -95,11 +77,6 @@ public class FeedItemsList extends ItemsList {
     @Override
     protected ReadFilter getReadFilter() {
         return PrefsUtils.getReadFilterForFeed(this, feed.feedId);
-    }
-
-    @Override
-    protected DefaultFeedView getDefaultFeedView() {
-        return PrefsUtils.getDefaultFeedViewForFeed(this, feed.feedId);
     }
 
     @Override

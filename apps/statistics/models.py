@@ -8,6 +8,7 @@ from apps.profile.models import Profile
 from apps.statistics.rstats import RStats, round_time
 from utils import json_functions as json
 from utils import db_functions
+from utils import log as logging
 
 class MStatistics(mongo.Document):
     key   = mongo.StringField(unique=True)
@@ -185,7 +186,7 @@ class MStatistics(mongo.Document):
         db_times = {}
         latest_db_times = {}
         
-        for db in ['sql', 'mongo', 'redis']:
+        for db in ['sql', 'mongo', 'redis', 'task_sql', 'task_mongo', 'task_redis']:
             db_times[db] = []
             for hour in range(24):
                 start_hours_ago = now - datetime.timedelta(hours=hour+1)
@@ -223,6 +224,9 @@ class MStatistics(mongo.Document):
             ('latest_sql_avg',          latest_db_times['sql']),
             ('latest_mongo_avg',        latest_db_times['mongo']),
             ('latest_redis_avg',        latest_db_times['redis']),
+            ('latest_task_sql_avg',     latest_db_times['task_sql']),
+            ('latest_task_mongo_avg',   latest_db_times['task_mongo']),
+            ('latest_task_redis_avg',   latest_db_times['task_redis']),
         )
         for key, value in values:
             cls.objects(key=key).update_one(upsert=True, set__key=key, set__value=value)
@@ -248,7 +252,11 @@ class MFeedback(mongo.Document):
         
     @classmethod
     def collect_feedback(cls):
-        data = urllib2.urlopen('https://getsatisfaction.com/newsblur/topics.widget').read()
+        try:
+            data = urllib2.urlopen('https://getsatisfaction.com/newsblur/topics.widget').read()
+        except (urllib2.HTTPError), e:
+            logging.debug(" ***> Failed to collect feedback: %s" % e)
+            return
         data = json.decode(data[1:-1])
         i    = 0
         if len(data):

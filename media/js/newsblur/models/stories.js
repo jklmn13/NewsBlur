@@ -47,6 +47,11 @@ NEWSBLUR.Models.Story = Backbone.Model.extend({
         }
     },
     
+    story_authors: function() {
+        return this.get('story_authors').replace(/</g, '&lt;')
+                                        .replace(/>/g, '&gt;');
+    },
+    
     formatted_short_date: function() {
         var timestamp = this.get('story_timestamp');
         var dateformat = NEWSBLUR.assets.preference('dateformat');
@@ -107,21 +112,21 @@ NEWSBLUR.Models.Story = Backbone.Model.extend({
             return date.format("l, F jS Y ") + time;
         }
     },
-    
-    has_modifications: function() {
-        if (this.get('story_content').indexOf('<ins') != -1 ||
-            this.get('story_content').indexOf('<del') != -1) {
-            return true;
-        }
-        return false;
-    },
-    
+
     mark_read: function(options) {
         return NEWSBLUR.assets.stories.mark_read(this, options);
     },
     
     open_story_in_new_tab: function(background) {
         this.mark_read({skip_delay: true});
+
+        // Safari browser on Linux is an impossibility, and thus we're actually
+        // on a WebKit-based browser (WebKitGTK or QTWebKit). These can't handle
+        // background tabs. Work around it by disabling backgrounding if we
+        // think we're on Safari and we're also on X11 or Linux
+        if ($.browser.safari && /(\(X11|Linux)/.test(navigator.userAgent)) {
+            background = false;
+        }
 
         if (background && !$.browser.mozilla) {
             var anchor, event;
@@ -480,7 +485,6 @@ NEWSBLUR.Collections.Stories = Backbone.Collection.extend({
             visible_stories[current_index].set('selected', false);
             return visible_stories[current_index];
         }
-
     },
     
     get_last_unread_story: function(unread_count, options) {

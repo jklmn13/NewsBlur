@@ -7,6 +7,7 @@
 //
 
 #import "UserTagsViewController.h"
+#import "UISearchBar+Field.h"
 #import "FeedTableCell.h"
 #import "FolderTitleView.h"
 #import "StoriesCollection.h"
@@ -28,31 +29,34 @@ const NSInteger kHeaderHeight = 24;
     tagsTableView = [[UITableView alloc] init];
     tagsTableView.delegate = self;
     tagsTableView.dataSource = self;
-    tagsTableView.frame = CGRectMake(0, 0, self.view.frame.size.width, self.view.frame.size.height);
+    tagsTableView.frame = CGRectMake(0.0, 44.0, self.view.frame.size.width, self.view.frame.size.height - 44.0);
     tagsTableView.autoresizingMask = UIViewAutoresizingFlexibleHeight | UIViewAutoresizingFlexibleWidth;
     [self.view addSubview:tagsTableView];
     
-    addTagBar = [[UISearchBar alloc]
-                 initWithFrame:CGRectMake(0, 0,
-                                          CGRectGetWidth(tagsTableView.frame), 44.)];
+    addTagBar = [[UISearchBar alloc] initWithFrame:CGRectMake(0.0, 0.0, self.view.frame.size.width, 44.0)];
     [addTagBar setDelegate:self];
     [addTagBar setImage:[UIImage imageNamed:@"add_tag.png"]
        forSearchBarIcon:UISearchBarIconSearch
                   state:UIControlStateNormal];
     [addTagBar setReturnKeyType:UIReturnKeyDone];
-    [addTagBar setBackgroundColor:UIColorFromRGB(0xDCDFD6)];
-    [addTagBar setTintColor:[UIColor whiteColor]];
     [addTagBar setSearchBarStyle:UISearchBarStyleMinimal];
     [addTagBar setAutocapitalizationType:UITextAutocapitalizationTypeNone];
-    tagsTableView.tableHeaderView = addTagBar;
+    [self.view addSubview:addTagBar];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
 
-    tagsTableView.frame = CGRectMake(0, 0, self.view.frame.size.width, self.view.frame.size.height);
+    tagsTableView.frame = CGRectMake(0.0, 44.0, self.view.frame.size.width, self.view.frame.size.height - 44.0);
+    addTagBar.frame = CGRectMake(0.0, 0.0, self.view.frame.size.width, 44.0);
+    tagsTableView.backgroundColor = UIColorFromRGB(0xf4f4f4);
     [tagsTableView reloadData];
     [tagsTableView setContentOffset:CGPointZero];
+    
+    [addTagBar setBackgroundColor:UIColorFromRGB(0xDCDFD6)];
+    [addTagBar setTintColor:UIColorFromRGB(NEWSBLUR_WHITE_COLOR)];
+    addTagBar.nb_searchField.textColor = UIColorFromRGB(NEWSBLUR_BLACK_COLOR);
+    addTagBar.nb_searchField.tintColor = UIColorFromRGB(NEWSBLUR_BLACK_COLOR);
 }
 
 - (void)didReceiveMemoryWarning {
@@ -244,11 +248,11 @@ const NSInteger kHeaderHeight = 24;
         NSMutableArray *newUserTags = [[story objectForKey:@"user_tags"] mutableCopy];
         [newUserTags removeObject:tagName];
         [story setObject:newUserTags forKey:@"user_tags"];
-        [appDelegate.storiesCollection markStory:story asSaved:YES];
+        [appDelegate.storiesCollection markStory:story asSaved:YES forceUpdate:YES];
         [appDelegate.storiesCollection syncStoryAsSaved:story];
         NSInteger newCount = [appDelegate adjustSavedStoryCount:tagName direction:-1];
-        
         NSInteger row = [[self arrayUserTagsNotInStory] indexOfObject:tagName];
+        
         [tagsTableView beginUpdates];
         [tagsTableView deleteRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:indexPath.row inSection:0]]
                              withRowAnimation:UITableViewRowAnimationTop];
@@ -269,7 +273,7 @@ const NSInteger kHeaderHeight = 24;
         NSInteger otherTagRow = [[self arrayUserTagsNotInStory] indexOfObject:tagName];
 
         [story setObject:[[story objectForKey:@"user_tags"] arrayByAddingObject:tagName] forKey:@"user_tags"];
-        [appDelegate.storiesCollection markStory:story asSaved:YES];
+        [appDelegate.storiesCollection markStory:story asSaved:YES forceUpdate:YES];
         [appDelegate.storiesCollection syncStoryAsSaved:story];
         [appDelegate adjustSavedStoryCount:tagName direction:1];
         
@@ -291,7 +295,7 @@ const NSInteger kHeaderHeight = 24;
         NSInteger storyTagRow = [[self arrayStoryTags] indexOfObject:tagName];
 
         [story setObject:[[story objectForKey:@"user_tags"] arrayByAddingObject:tagName] forKey:@"user_tags"];
-        [appDelegate.storiesCollection markStory:story asSaved:YES];
+        [appDelegate.storiesCollection markStory:story asSaved:YES forceUpdate:YES];
         [appDelegate.storiesCollection syncStoryAsSaved:story];
         [appDelegate adjustSavedStoryCount:tagName direction:1];
         
@@ -318,7 +322,7 @@ const NSInteger kHeaderHeight = 24;
     NSMutableDictionary *story = [appDelegate.activeStory mutableCopy];
     
     [story setObject:[[story objectForKey:@"user_tags"] arrayByAddingObject:tagName] forKey:@"user_tags"];
-    [appDelegate.storiesCollection markStory:story asSaved:YES];
+    [appDelegate.storiesCollection markStory:story asSaved:YES forceUpdate:YES];
     [appDelegate.storiesCollection syncStoryAsSaved:story];
     [appDelegate adjustSavedStoryCount:tagName direction:1];
     

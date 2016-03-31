@@ -16,13 +16,14 @@ from django.core.urlresolvers import reverse
 from django.contrib.auth import login as login_user
 from django.contrib.auth import logout as logout_user
 from django.contrib.auth.models import User
-from django.http import HttpResponse, HttpResponseRedirect, HttpResponseForbidden, Http404
+from django.http import HttpResponse, HttpResponseRedirect, HttpResponseForbidden, Http404, UnreadablePostError
 from django.conf import settings
 from django.core.mail import mail_admins
 from django.core.validators import email_re
 from django.core.mail import EmailMultiAlternatives
 from django.contrib.sites.models import Site
 from django.utils import feedgenerator
+from django.utils.encoding import smart_unicode
 from mongoengine.queryset import OperationError
 from mongoengine.queryset import NotUniqueError
 from apps.recommendations.models import RecommendedFeed
@@ -220,7 +221,7 @@ def autologin(request, username, secret):
     else:
         return HttpResponseRedirect(reverse('index'))
     
-@ratelimit(minutes=1, requests=24)
+@ratelimit(minutes=1, requests=60)
 @never_cache
 @json.json_view
 def load_feeds(request):
@@ -296,6 +297,7 @@ def load_feeds(request):
         'social_services': social_services,
         'user_profile': user.profile,
         "is_staff": user.is_staff,
+        'user_id': user.pk,
         'folders': json.decode(folders.folders),
         'starred_count': starred_count,
         'starred_counts': starred_counts,
@@ -320,11 +322,15 @@ def load_feeds_flat(request):
     user = request.user
     include_favicons = is_true(request.REQUEST.get('include_favicons', False))
     update_counts    = is_true(request.REQUEST.get('update_counts', True))
+    include_inactive = is_true(request.REQUEST.get('include_inactive', False))
     
     feeds = {}
+    inactive_feeds = {}
     day_ago = datetime.datetime.now() - datetime.timedelta(days=1)
     scheduled_feeds = []
-    iphone_version = "2.1"
+    iphone_version = "2.1" # Preserved forever. Don't change.
+    latest_ios_build = "52"
+    latest_ios_version = "5.0.0b2"
     
     if include_favicons == 'false': include_favicons = False
     if update_counts == 'false': update_counts = False
@@ -341,7 +347,9 @@ def load_feeds_flat(request):
     if not user_subs and folders:
         folders.auto_activate()
         user_subs = UserSubscription.objects.select_related('feed').filter(user=user, active=True)
-
+    if include_inactive:
+        inactive_subs = UserSubscription.objects.select_related('feed').filter(user=user, active=False)
+    
     for sub in user_subs:
         if update_counts and sub.needs_unread_recalc:
             sub.calculate_feed_scores(silent=True)
@@ -353,14 +361,21 @@ def load_feeds_flat(request):
         elif sub.feed.next_scheduled_update < day_ago:
             scheduled_feeds.append(sub.feed.pk)
     
+    if include_inactive:
+        for sub in inactive_subs:
+            inactive_feeds[sub.feed_id] = sub.canonical(include_favicon=include_favicons)
+    
     if len(scheduled_feeds) > 0 and request.user.is_authenticated():
         logging.user(request, "~SN~FMTasking the scheduling immediate fetch of ~SB%s~SN feeds..." % 
                      len(scheduled_feeds))
         ScheduleImmediateFetches.apply_async(kwargs=dict(feed_ids=scheduled_feeds, user_id=user.pk))
     
     flat_folders = []
+    flat_folders_with_inactive = []
     if folders:
         flat_folders = folders.flatten_folders(feeds=feeds)
+        flat_folders_with_inactive = folders.flatten_folders(feeds=feeds,
+                                                             inactive_feeds=inactive_feeds)
         
     social_params = {
         'user_id': user.pk,
@@ -378,22 +393,28 @@ def load_feeds_flat(request):
     if not user_subs:
         categories = MCategory.serialize()
         
-    logging.user(request, "~FB~SBLoading ~FY%s~FB/~FM%s~FB feeds/socials ~FMflat~FB%s" % (
-            len(feeds.keys()), len(social_feeds), '. ~FCUpdating counts.' if update_counts else ''))
+    logging.user(request, "~FB~SBLoading ~FY%s~FB/~FM%s~FB/~FR%s~FB feeds/socials/inactive ~FMflat~FB%s" % (
+            len(feeds.keys()), len(social_feeds), len(inactive_feeds), '. ~FCUpdating counts.' if update_counts else ''))
 
     data = {
         "flat_folders": flat_folders, 
-        "feeds": feeds,
+        "flat_folders_with_inactive": flat_folders_with_inactive, 
+        "feeds": feeds if not include_inactive else {"0": "Don't include `include_inactive=true` if you want active feeds."},
+        "inactive_feeds": inactive_feeds if include_inactive else {"0": "Include `include_inactive=true`"},
         "social_feeds": social_feeds,
         "social_profile": social_profile,
         "social_services": social_services,
         "user": user.username,
+        "user_id": user.pk,
         "is_staff": user.is_staff,
         "user_profile": user.profile,
         "iphone_version": iphone_version,
+        "latest_ios_build": latest_ios_build,
+        "latest_ios_version": latest_ios_version,
         "categories": categories,
         'starred_count': starred_count,
         'starred_counts': starred_counts,
+        'share_ext_token': user.profile.secret_token,
     }
     return data
 
@@ -401,6 +422,7 @@ def load_feeds_flat(request):
 @never_cache
 @json.json_view
 def refresh_feeds(request):
+    start = datetime.datetime.now()
     user = get_user(request)
     feed_ids = request.REQUEST.getlist('feed_id')
     check_fetch_status = request.REQUEST.get('check_fetch_status')
@@ -412,20 +434,21 @@ def refresh_feeds(request):
     if feed_ids or (not social_feed_ids and not feed_ids):
         feeds = UserSubscription.feeds_with_updated_counts(user, feed_ids=feed_ids, 
                                                            check_fetch_status=check_fetch_status)
+    checkpoint1 = datetime.datetime.now()
     social_feeds = {}
     if social_feed_ids or (not social_feed_ids and not feed_ids):
         social_feeds = MSocialSubscription.feeds_with_updated_counts(user, social_feed_ids=social_feed_ids)
+    checkpoint2 = datetime.datetime.now()
     
     favicons_fetching = [int(f) for f in favicons_fetching if f]
     feed_icons = {}
     if favicons_fetching:
         feed_icons = dict([(i.feed_id, i) for i in MFeedIcon.objects(feed_id__in=favicons_fetching)])
-    
-    for feed_id, feed in feeds.items():
-        if feed_id in favicons_fetching and feed_id in feed_icons:
-            feeds[feed_id]['favicon'] = feed_icons[feed_id].data
-            feeds[feed_id]['favicon_color'] = feed_icons[feed_id].color
-            feeds[feed_id]['favicon_fetching'] = feed.get('favicon_fetching')
+        for feed_id, feed in feeds.items():
+            if feed_id in favicons_fetching and feed_id in feed_icons:
+                feeds[feed_id]['favicon'] = feed_icons[feed_id].data
+                feeds[feed_id]['favicon_color'] = feed_icons[feed_id].color
+                feeds[feed_id]['favicon_fetching'] = feed.get('favicon_fetching')
 
     user_subs = UserSubscription.objects.filter(user=user, active=True).only('feed')
     sub_feed_ids = [s.feed_id for s in user_subs]
@@ -449,8 +472,16 @@ def refresh_feeds(request):
     interactions_count = MInteraction.user_unread_count(user.pk)
 
     if True or settings.DEBUG or check_fetch_status:
-        logging.user(request, "~FBRefreshing %s feeds (%s/%s)" % (
-            len(feeds.keys()), check_fetch_status, len(favicons_fetching)))
+        end = datetime.datetime.now()
+        extra_fetch = ""
+        if check_fetch_status or favicons_fetching:
+            extra_fetch = "(%s/%s)" % (check_fetch_status, len(favicons_fetching))
+        logging.user(request, "~FBRefreshing %s+%s feeds %s (%.4s/%.4s/%.4s)" % (
+            len(feeds.keys()), len(social_feeds.keys()), extra_fetch, 
+            (checkpoint1-start).total_seconds(),
+            (checkpoint2-start).total_seconds(),
+            (end-start).total_seconds(),
+            ))
 
     return {
         'feeds': feeds, 
@@ -523,7 +554,7 @@ def load_single_feed(request, feed_id):
     offset                  = limit * (page-1)
     order                   = request.REQUEST.get('order', 'newest')
     read_filter             = request.REQUEST.get('read_filter', 'all')
-    query                   = request.REQUEST.get('query')
+    query                   = request.REQUEST.get('query', '').strip()
     include_story_content   = is_true(request.REQUEST.get('include_story_content', True))
     include_hidden          = is_true(request.REQUEST.get('include_hidden', False))
     message                 = None
@@ -544,6 +575,10 @@ def load_single_feed(request, feed_id):
     except UserSubscription.DoesNotExist:
         usersub = None
     
+    if feed.is_newsletter and not usersub:
+        # User must be subscribed to a newsletter in order to read it
+        raise Http404
+        
     if query:
         if user.profile.is_premium:
             user_search = MUserSearch.get_user(user.pk)
@@ -629,7 +664,9 @@ def load_single_feed(request, feed_id):
         story['long_parsed_date'] = format_story_link_date__long(story_date, nowtz)
         if usersub:
             story['read_status'] = 1
-            if (read_filter == 'all' or query) and usersub:
+            if story['story_date'] < user.profile.unread_cutoff:
+                story['read_status'] = 1
+            elif (read_filter == 'all' or query) and usersub:
                 story['read_status'] = 1 if story['story_hash'] not in unread_story_hashes else 0
             elif read_filter == 'unread' and usersub:
                 story['read_status'] = 0
@@ -773,7 +810,7 @@ def load_starred_stories(request):
     offset       = int(request.REQUEST.get('offset', 0))
     limit        = int(request.REQUEST.get('limit', 10))
     page         = int(request.REQUEST.get('page', 0))
-    query        = request.REQUEST.get('query')
+    query        = request.REQUEST.get('query', '').strip()
     order        = request.REQUEST.get('order', 'newest')
     tag          = request.REQUEST.get('tag')
     story_hashes = request.REQUEST.getlist('h')[:100]
@@ -943,6 +980,133 @@ def starred_stories_rss_feed(request, user_id, secret_token, tag_slug):
     ))
     return HttpResponse(rss.writeString('utf-8'), content_type='application/rss+xml')
 
+def folder_rss_feed(request, user_id, secret_token, unread_filter, folder_slug):
+    domain = Site.objects.get_current().domain
+    
+    try:
+        user = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        raise Http404
+    
+    user_sub_folders = get_object_or_404(UserSubscriptionFolders, user=user)
+    feed_ids, folder_title = user_sub_folders.feed_ids_under_folder_slug(folder_slug)
+    
+    usersubs = UserSubscription.subs_for_feeds(user.pk, feed_ids=feed_ids)
+    if feed_ids and user.profile.is_premium:
+        params = {
+            "user_id": user.pk, 
+            "feed_ids": feed_ids,
+            "offset": 0,
+            "limit": 20,
+            "order": 'newest',
+            "read_filter": 'all',
+            "cache_prefix": "RSS:"
+        }
+        story_hashes, unread_feed_story_hashes = UserSubscription.feed_stories(**params)
+    else:
+        story_hashes = []
+        unread_feed_story_hashes = []
+
+    mstories = MStory.objects(story_hash__in=story_hashes).order_by('-story_date')
+    stories = Feed.format_stories(mstories)
+    
+    filtered_stories = []
+    found_feed_ids = list(set([story['story_feed_id'] for story in stories]))
+    trained_feed_ids = [sub.feed_id for sub in usersubs if sub.is_trained]
+    found_trained_feed_ids = list(set(trained_feed_ids) & set(found_feed_ids))    
+    if found_trained_feed_ids:
+        classifier_feeds = list(MClassifierFeed.objects(user_id=user.pk,
+                                                        feed_id__in=found_trained_feed_ids,
+                                                        social_user_id=0))
+        classifier_authors = list(MClassifierAuthor.objects(user_id=user.pk, 
+                                                            feed_id__in=found_trained_feed_ids))
+        classifier_titles = list(MClassifierTitle.objects(user_id=user.pk, 
+                                                          feed_id__in=found_trained_feed_ids))
+        classifier_tags = list(MClassifierTag.objects(user_id=user.pk, 
+                                                      feed_id__in=found_trained_feed_ids))
+    else:
+        classifier_feeds = []
+        classifier_authors = []
+        classifier_titles = []
+        classifier_tags = []
+    classifiers = sort_classifiers_by_feed(user=user, feed_ids=found_feed_ids,
+                                           classifier_feeds=classifier_feeds,
+                                           classifier_authors=classifier_authors,
+                                           classifier_titles=classifier_titles,
+                                           classifier_tags=classifier_tags)
+    for story in stories:
+        story['intelligence'] = {
+            'feed':   apply_classifier_feeds(classifier_feeds, story['story_feed_id']),
+            'author': apply_classifier_authors(classifier_authors, story),
+            'tags':   apply_classifier_tags(classifier_tags, story),
+            'title':  apply_classifier_titles(classifier_titles, story),
+        }
+        story['score'] = UserSubscription.score_story(story['intelligence'])
+        if unread_filter == 'focus' and story['score'] >= 1:
+            filtered_stories.append(story)
+        elif unread_filter == 'unread' and story['score'] >= 0:
+            filtered_stories.append(story)
+
+    stories = filtered_stories
+        
+    data = {}
+    data['title'] = "%s from %s (%s sites)" % (folder_title, user.username, len(feed_ids))
+    data['link'] = "https://%s%s" % (
+        domain,
+        reverse('folder', kwargs=dict(folder_name=folder_title)))
+    data['description'] = "Unread stories in %s on NewsBlur. From %s's account and contains %s sites." % (
+        folder_title,
+        user.username,
+        len(feed_ids))
+    data['lastBuildDate'] = datetime.datetime.utcnow()
+    data['generator'] = 'NewsBlur - %s' % settings.NEWSBLUR_URL
+    data['docs'] = None
+    data['author_name'] = user.username
+    data['feed_url'] = "https://%s%s" % (
+        domain,
+        reverse('folder-rss-feed', 
+                kwargs=dict(user_id=user_id, secret_token=secret_token, unread_filter=unread_filter, folder_slug=folder_slug)),
+    )
+    rss = feedgenerator.Atom1Feed(**data)
+
+    for story in stories:
+        feed = Feed.get_by_id(story['story_feed_id'])
+        story_content = """<img src="//%s/rss_feeds/icon/%s"> %s <br><br> %s""" % (
+            Site.objects.get_current().domain,
+            story['story_feed_id'],
+            feed.feed_title if feed else "",
+            smart_unicode(story['story_content'])
+        )
+        story_data = {
+            'title': story['story_title'],
+            'link': story['story_permalink'],
+            'description': story_content,
+            'categories': story['story_tags'],
+            'unique_id': 'https://%s/site/%s/%s/' % (domain, story['story_feed_id'], story['guid_hash']),
+            'pubdate': localtime_for_timezone(story['story_date'], user.profile.timezone),
+        }
+        if story['story_authors']:
+            story_data['author_name'] = story['story_authors']
+        rss.add_item(**story_data)
+    
+    if not user.profile.is_premium:
+        story_data = {
+            'title': "You must have a premium account on NewsBlur to have RSS feeds for folders.",
+            'link': "https://%s" % domain,
+            'description': "You must have a premium account on NewsBlur to have RSS feeds for folders.",
+            'unique_id': "https://%s/premium_only" % domain,
+            'pubdate': localtime_for_timezone(datetime.datetime.now(), user.profile.timezone),
+        }
+        rss.add_item(**story_data)
+    
+    logging.user(request, "~FBGenerating ~SB%s~SN's folder RSS feed (%s, %s stories): ~FM%s" % (
+        user.username,
+        folder_title,
+        len(stories),
+        request.META.get('HTTP_USER_AGENT', "")[:24]
+    ))
+    return HttpResponse(rss.writeString('utf-8'), content_type='application/rss+xml')
+
 @json.json_view
 def load_read_stories(request):
     user   = get_user(request)
@@ -950,7 +1114,7 @@ def load_read_stories(request):
     limit  = int(request.REQUEST.get('limit', 10))
     page   = int(request.REQUEST.get('page', 0))
     order  = request.REQUEST.get('order', 'newest')
-    query  = request.REQUEST.get('query')
+    query  = request.REQUEST.get('query', '').strip()
     now    = localtime_for_timezone(datetime.datetime.now(), user.profile.timezone)
     message = None
     if page: offset = limit * (page - 1)
@@ -1038,7 +1202,7 @@ def load_river_stories__redis(request):
     page              = int(request.REQUEST.get('page', 1))
     order             = request.REQUEST.get('order', 'newest')
     read_filter       = request.REQUEST.get('read_filter', 'unread')
-    query             = request.REQUEST.get('query')
+    query             = request.REQUEST.get('query', '').strip()
     include_hidden    = is_true(request.REQUEST.get('include_hidden', False))
     now               = localtime_for_timezone(datetime.datetime.now(), user.profile.timezone)
     usersubs          = []
@@ -1271,6 +1435,7 @@ def unread_story_hashes(request):
                                                  order=order, read_filter=read_filter,
                                                  include_timestamps=include_timestamps,
                                                  cutoff_date=user.profile.unread_cutoff)
+
     logging.user(request, "~FYLoading ~FCunread story hashes~FY: ~SB%s feeds~SN (%s story hashes)" % 
                            (len(feed_ids), len(story_hashes)))
     return dict(unread_feed_story_hashes=story_hashes)
@@ -1341,7 +1506,10 @@ def mark_story_as_read(request):
 @json.json_view
 def mark_story_hashes_as_read(request):
     r = redis.Redis(connection_pool=settings.REDIS_PUBSUB_POOL)
-    story_hashes = request.REQUEST.getlist('story_hash')
+    try:
+        story_hashes = request.REQUEST.getlist('story_hash')
+    except UnreadablePostError:
+        return dict(code=-1, message="Missing `story_hash` list parameter.")
     
     feed_ids, friend_ids = RUserStory.mark_story_hashes_read(request.user.pk, story_hashes)
     
@@ -1552,6 +1720,10 @@ def mark_feed_as_read(request):
     errors = []
     cutoff_date = datetime.datetime.fromtimestamp(cutoff_timestamp) if cutoff_timestamp else None
     
+    if cutoff_date:
+        logging.user(request, "~FMMark %s feeds read, %s - cutoff: %s/%s" % 
+                     (len(feed_ids), direction, cutoff_timestamp, cutoff_date))
+    
     for feed_id in feed_ids:
         if 'social:' in feed_id:
             user_id = int(feed_id.replace('social:', ''))
@@ -1696,6 +1868,7 @@ def delete_feed_by_url(request):
     if in_folder == ' ':
         in_folder = ""
     
+    logging.user(request.user, "~FBFinding feed (delete_feed_by_url): %s" % url)
     feed = Feed.get_feed_from_url(url, create=False)
     if feed:
         user_sub_folders = get_object_or_404(UserSubscriptionFolders, user=request.user)
@@ -1873,7 +2046,8 @@ def add_feature(request):
 def load_features(request):
     user = get_user(request)
     page = max(int(request.REQUEST.get('page', 0)), 0)
-    logging.user(request, "~FBBrowse features: ~SBPage #%s" % (page+1))
+    if page > 1:
+        logging.user(request, "~FBBrowse features: ~SBPage #%s" % (page+1))
     features = Feature.objects.all()[page*3:(page+1)*3+1].values()
     features = [{
         'description': f['description'], 

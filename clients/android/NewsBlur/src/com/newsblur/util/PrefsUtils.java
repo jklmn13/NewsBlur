@@ -2,7 +2,6 @@ package com.newsblur.util;
 
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.net.URLConnection;
@@ -79,11 +78,13 @@ public class PrefsUtils {
         StringBuilder s = new StringBuilder(AppConstants.FEEDBACK_URL);
         s.append("<give us some feedback!>%0A%0A");
         s.append("%0Aapp version: ").append(getVersion(context));
-        s.append("%0Aandroid version: ").append(Build.VERSION.RELEASE);
+        s.append("%0Aandroid version: ").append(Build.VERSION.RELEASE).append(" (" + Build.DISPLAY + ")");
         s.append("%0Adevice: ").append(Build.MANUFACTURER + "+" + Build.MODEL + "+(" + Build.BOARD + ")");
+        s.append("%0Asqlite version: ").append(FeedUtils.dbHelper.getEngineVersion());
         s.append("%0Ausername: ").append(getUserDetails(context).username);
         s.append("%0Amemory: ").append(NBSyncService.isMemoryLow() ? "low" : "normal");
         s.append("%0Aspeed: ").append(NBSyncService.getSpeedInfo());
+        s.append("%0Apending actions: ").append(NBSyncService.getPendingInfo());
         s.append("%0Apremium: ");
         if (NBSyncService.isPremium == Boolean.TRUE) {
             s.append("yes");
@@ -202,9 +203,11 @@ public class PrefsUtils {
 			File imageFile = new File(file.getPath() + "/userProfilePicture");
 			bitmap.compress(CompressFormat.PNG, 100, new FileOutputStream(imageFile));
 
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
+        } catch (Exception e) {
+            // this can fail for a huge number of reasons, from storage problems to
+            // missing image codecs. if it fails, a placeholder will be used
+            Log.e(PrefsUtils.class.getName(), "couldn't save user profile image", e);
+        }
 	}
 
 	public static Bitmap getUserImage(final Context context) {
@@ -234,10 +237,15 @@ public class PrefsUtils {
         prefs.edit().putLong(AppConstants.LAST_SYNC_TIME, (new Date()).getTime()).commit();
     }
 
-    public static boolean isTimeToVacuum(Context context) {
+    private static long getLastVacuumTime(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PrefConstants.PREFERENCES, 0);
-        long lastTime = prefs.getLong(PrefConstants.LAST_VACUUM_TIME, 1L);
-        return ( (lastTime + AppConstants.VACUUM_TIME_MILLIS) < (new Date()).getTime() );
+        return prefs.getLong(PrefConstants.LAST_VACUUM_TIME, 1L);
+    }
+
+    public static boolean isTimeToVacuum(Context context) {
+        long lastTime = getLastVacuumTime(context);
+        long now = (new Date()).getTime();
+        return ( (lastTime + AppConstants.VACUUM_TIME_MILLIS) < now );
     }
 
     public static void updateLastVacuumTime(Context context) {
@@ -365,77 +373,106 @@ public class PrefsUtils {
         editor.commit();
     }
 
+    public static DefaultFeedView getDefaultFeedView(Context context, FeedSet fs) {
+		if (fs.isAllSaved()) {
+            return getDefaultFeedViewForFolder(context, PrefConstants.SAVED_STORIES_FOLDER_NAME);
+        } else if (fs.getSingleSavedTag() != null) {
+            return getDefaultFeedViewForFolder(context, PrefConstants.SAVED_STORIES_FOLDER_NAME);
+        } else if (fs.isGlobalShared()) {
+            return getDefaultFeedViewForFolder(context, PrefConstants.GLOBAL_SHARED_STORIES_FOLDER_NAME);
+        } else if (fs.isAllSocial()) {
+            return getDefaultFeedViewForFolder(context, PrefConstants.ALL_SHARED_STORIES_FOLDER_NAME);
+        } else if (fs.isAllNormal()) {
+            return getDefaultFeedViewForFolder(context, PrefConstants.ALL_STORIES_FOLDER_NAME);
+        } else if (fs.isFolder()) {
+            return getDefaultFeedViewForFolder(context, fs.getFolderName());
+        } else if (fs.getSingleFeed() != null) {
+            return getDefaultFeedViewForFeed(context, fs.getSingleFeed());
+        } else if (fs.getSingleSocialFeed() != null) {
+            return getDefaultFeedViewForFeed(context, fs.getSingleSocialFeed().getKey());
+        } else if (fs.isAllRead()) {
+            return getDefaultFeedViewForFolder(context, PrefConstants.READ_STORIES_FOLDER_NAME);
+        } else {
+            return DefaultFeedView.STORY;
+        }
+    } 
+
     public static StoryOrder getStoryOrder(Context context, FeedSet fs) {
         if (fs.isAllNormal()) {
             return getStoryOrderForFolder(context, PrefConstants.ALL_STORIES_FOLDER_NAME);
-        }
-        if (fs.getSingleFeed() != null) {
+        } else if (fs.getSingleFeed() != null) {
             return getStoryOrderForFeed(context, fs.getSingleFeed());
-        }
-        if (fs.getMultipleFeeds() != null) {
+        } else if (fs.getMultipleFeeds() != null) {
             return getStoryOrderForFolder(context, fs.getFolderName());
-        }
-
-        if (fs.isAllSocial()) {
+        } else if (fs.isAllSocial()) {
             return getStoryOrderForFolder(context, PrefConstants.ALL_SHARED_STORIES_FOLDER_NAME);
-        }
-        if (fs.getSingleSocialFeed() != null) {
+        } else if (fs.getSingleSocialFeed() != null) {
             return getStoryOrderForFeed(context, fs.getSingleSocialFeed().getKey());
-        }
-        if (fs.getMultipleSocialFeeds() != null) {
+        } else if (fs.getMultipleSocialFeeds() != null) {
             throw new IllegalArgumentException( "requests for multiple social feeds not supported" );
-        }
-
-        if (fs.isAllRead()) {
+        } else if (fs.isAllRead()) {
             // dummy value, not really used
             return StoryOrder.NEWEST;
-        }
-
-        if (fs.isAllSaved()) {
+        } else if (fs.isAllSaved()) {
             return getStoryOrderForFolder(context, PrefConstants.SAVED_STORIES_FOLDER_NAME);
-        }
-
-        if (fs.isGlobalShared()) {
+        } else if (fs.getSingleSavedTag() != null) {
+            return getStoryOrderForFolder(context, PrefConstants.SAVED_STORIES_FOLDER_NAME);
+        } else if (fs.isGlobalShared()) {
             return StoryOrder.NEWEST;
+        } else {
+            throw new IllegalArgumentException( "unknown type of feed set" );
         }
+    }
 
-        throw new IllegalArgumentException( "unknown type of feed set" );
+    public static void updateStoryOrder(Context context, FeedSet fs, StoryOrder newOrder) {
+        if (fs.isAllNormal()) {
+            setStoryOrderForFolder(context, PrefConstants.ALL_STORIES_FOLDER_NAME, newOrder);
+        } else if (fs.getSingleFeed() != null) {
+            setStoryOrderForFeed(context, fs.getSingleFeed(), newOrder);
+        } else if (fs.getMultipleFeeds() != null) {
+            setStoryOrderForFolder(context, fs.getFolderName(), newOrder);
+        } else if (fs.isAllSocial()) {
+            setStoryOrderForFolder(context, PrefConstants.ALL_SHARED_STORIES_FOLDER_NAME, newOrder);
+        } else if (fs.getSingleSocialFeed() != null) {
+            setStoryOrderForFeed(context, fs.getSingleSocialFeed().getKey(), newOrder);
+        } else if (fs.getMultipleSocialFeeds() != null) {
+            throw new IllegalArgumentException( "multiple social feeds not supported" );
+        } else if (fs.isAllRead()) {
+            throw new IllegalArgumentException( "AllRead FeedSet type has fixed ordering" );
+        } else if (fs.isAllSaved()) {
+            setStoryOrderForFolder(context, PrefConstants.SAVED_STORIES_FOLDER_NAME, newOrder);
+        } else if (fs.getSingleSavedTag() != null) {
+            setStoryOrderForFolder(context, PrefConstants.SAVED_STORIES_FOLDER_NAME, newOrder);
+        } else if (fs.isGlobalShared()) {
+            throw new IllegalArgumentException( "GlobalShared FeedSet type has fixed ordering" );
+        } else {
+            throw new IllegalArgumentException( "unknown type of feed set" );
+        }
     }
 
     public static ReadFilter getReadFilter(Context context, FeedSet fs) {
         if (fs.isAllNormal()) {
             return getReadFilterForFolder(context, PrefConstants.ALL_STORIES_FOLDER_NAME);
-        }
-        if (fs.getSingleFeed() != null) {
+        } else if (fs.getSingleFeed() != null) {
             return getReadFilterForFeed(context, fs.getSingleFeed());
-        }
-        if (fs.getMultipleFeeds() != null) {
+        } else if (fs.getMultipleFeeds() != null) {
             return getReadFilterForFolder(context, fs.getFolderName());
-        }
-
-        if (fs.isAllSocial()) {
+        } else if (fs.isAllSocial()) {
             return getReadFilterForFolder(context, PrefConstants.ALL_SHARED_STORIES_FOLDER_NAME);
-        }
-        if (fs.getSingleSocialFeed() != null) {
+        } else if (fs.getSingleSocialFeed() != null) {
             return getReadFilterForFeed(context, fs.getSingleSocialFeed().getKey());
-        }
-        if (fs.getMultipleSocialFeeds() != null) {
+        } else if (fs.getMultipleSocialFeeds() != null) {
             throw new IllegalArgumentException( "requests for multiple social feeds not supported" );
-        }
-
-        if (fs.isAllRead()) {
+        } else if (fs.isAllRead()) {
             // dummy value, not really used
             return ReadFilter.ALL;
-        }
-
-        if (fs.isAllSaved()) {
+        } else if (fs.isAllSaved()) {
             return getReadFilterForFolder(context, PrefConstants.SAVED_STORIES_FOLDER_NAME);
-        }
-
-        if (fs.isGlobalShared()) {
+        } else if (fs.getSingleSavedTag() != null) {
+            return getReadFilterForFolder(context, PrefConstants.SAVED_STORIES_FOLDER_NAME);
+        } else if (fs.isGlobalShared()) {
             return ReadFilter.UNREAD;
         }
-
         throw new IllegalArgumentException( "unknown type of feed set" );
     }
 
@@ -451,6 +488,11 @@ public class PrefsUtils {
     public static boolean isShowContentPreviews(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PrefConstants.PREFERENCES, 0);
         return prefs.getBoolean(PrefConstants.STORIES_SHOW_PREVIEWS, true);
+    }
+
+    public static boolean isAutoOpenFirstUnread(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PrefConstants.PREFERENCES, 0);
+        return prefs.getBoolean(PrefConstants.STORIES_AUTO_OPEN_FIRST, false);
     }
 
     public static boolean isOfflineEnabled(Context context) {
@@ -524,5 +566,10 @@ public class PrefsUtils {
     public static VolumeKeyNavigation getVolumeKeyNavigation(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PrefConstants.PREFERENCES, 0);
         return VolumeKeyNavigation.valueOf(prefs.getString(PrefConstants.VOLUME_KEY_NAVIGATION, VolumeKeyNavigation.OFF.toString()));
+    }
+
+    public static MarkAllReadConfirmation getMarkAllReadConfirmation(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PrefConstants.PREFERENCES, 0);
+        return MarkAllReadConfirmation.valueOf(prefs.getString(PrefConstants.MARK_ALL_READ_CONFIRMATION, MarkAllReadConfirmation.FOLDER_ONLY.toString()));
     }
 }

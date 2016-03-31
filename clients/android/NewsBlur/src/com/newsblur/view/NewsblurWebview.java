@@ -4,8 +4,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
-import android.os.Handler;
-import android.os.Message;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.KeyEvent;
@@ -19,7 +17,6 @@ import android.widget.FrameLayout;
 
 import com.newsblur.activity.Reading;
 import com.newsblur.fragment.ReadingItemFragment;
-import com.newsblur.util.AppConstants;
 
 public class NewsblurWebview extends WebView {
 
@@ -40,8 +37,7 @@ public class NewsblurWebview extends WebView {
 		getSettings().setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
 		getSettings().setDomStorageEnabled(true);
 		getSettings().setSupportZoom(true);
-		getSettings().setAppCacheMaxSize(1024*1024*8);
-		getSettings().setAppCachePath("/data/data/com.newsblur/cache");
+		getSettings().setAppCachePath(context.getCacheDir().getAbsolutePath());
 		getSettings().setAllowFileAccess(true);
 		getSettings().setAppCacheEnabled(true);
 
@@ -54,9 +50,13 @@ public class NewsblurWebview extends WebView {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
                 Uri uri = Uri.parse(url);
-                Intent i = new Intent(Intent.ACTION_VIEW);
-                i.setData(uri);
-                context.startActivity(i);
+                try {
+                    Intent i = new Intent(Intent.ACTION_VIEW);
+                    i.setData(uri);
+                    context.startActivity(i);
+                } catch (Exception e) {
+                    Log.wtf(this.getClass().getName(), "device cannot open URLs");
+                }
                 return true;
             }
         });

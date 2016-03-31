@@ -1,38 +1,24 @@
 package com.newsblur.fragment;
 
-import android.content.Intent;
 import android.database.Cursor;
 import android.os.Bundle;
 import android.content.Loader;
-import android.view.View;
-import android.widget.AdapterView;
 
 import com.newsblur.R;
-import com.newsblur.activity.FeedReading;
-import com.newsblur.activity.ItemsList;
-import com.newsblur.activity.Reading;
 import com.newsblur.database.DatabaseConstants;
 import com.newsblur.database.FeedItemsAdapter;
 import com.newsblur.domain.Feed;
-import com.newsblur.util.DefaultFeedView;
-import com.newsblur.util.StateFilter;
-import com.newsblur.util.StoryOrder;
-import com.newsblur.util.ReadFilter;
 import com.newsblur.view.FeedItemViewBinder;
 
 public class FeedItemListFragment extends ItemListFragment {
 
 	private Feed feed;
 
-    public static FeedItemListFragment newInstance(Feed feed, StateFilter currentState, DefaultFeedView defaultFeedView) {
+    public static FeedItemListFragment newInstance(Feed feed) {
 		FeedItemListFragment feedItemFragment = new FeedItemListFragment();
-
 		Bundle args = new Bundle();
-		args.putSerializable("currentState", currentState);
 		args.putSerializable("feed", feed);
-        args.putSerializable("defaultFeedView", defaultFeedView);
 		feedItemFragment.setArguments(args);
-
 		return feedItemFragment;
 	}
 
@@ -45,7 +31,7 @@ public class FeedItemListFragment extends ItemListFragment {
     @Override
 	public void onLoadFinished(Loader<Cursor> loader, Cursor cursor) {
         if ((adapter == null) && (cursor != null)) {
-            String[] groupFrom = new String[] { DatabaseConstants.STORY_TITLE, DatabaseConstants.STORY_SHORT_CONTENT, DatabaseConstants.STORY_AUTHORS, DatabaseConstants.STORY_TIMESTAMP, DatabaseConstants.SUM_STORY_TOTAL };
+            String[] groupFrom = new String[] { DatabaseConstants.STORY_TITLE, DatabaseConstants.STORY_SHORT_CONTENT, DatabaseConstants.STORY_AUTHORS, DatabaseConstants.STORY_TIMESTAMP, DatabaseConstants.STORY_INTELLIGENCE_TOTAL };
             int[] groupTo = new int[] { R.id.row_item_title, R.id.row_item_content, R.id.row_item_author, R.id.row_item_date, R.id.row_item_sidebar };
             adapter = new FeedItemsAdapter(getActivity(), feed, R.layout.row_item, cursor, groupFrom, groupTo);
             adapter.setViewBinder(new FeedItemViewBinder(getActivity()));
@@ -53,17 +39,5 @@ public class FeedItemListFragment extends ItemListFragment {
        }
        super.onLoadFinished(loader, cursor);
     }
-
-	@Override
-	public void onItemClick_(AdapterView<?> parent, View view, int position, long id) {
-        if (getActivity().isFinishing()) return;
-		Intent i = new Intent(getActivity(), FeedReading.class);
-        i.putExtra(Reading.EXTRA_FEEDSET, getFeedSet());
-		i.putExtra(Reading.EXTRA_FEED, feed);
-		i.putExtra(FeedReading.EXTRA_POSITION, position);
-		i.putExtra(ItemsList.EXTRA_STATE, currentState);
-        i.putExtra(Reading.EXTRA_DEFAULT_FEED_VIEW, defaultFeedView);
-		startActivity(i);
-	}
 
 }

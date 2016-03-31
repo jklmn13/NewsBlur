@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
+import android.os.PowerManager;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnClickListener;
@@ -22,33 +23,9 @@ public class ViewUtils {
     private static Drawable tag_green_background, tag_red_background;
     private static int tag_green_text, tag_red_text;
 
-	public static void setupShareCount(Context context, View storyView, int sharedUserCount) {
-		String sharedBy = context.getResources().getString(R.string.reading_shared_count);
-		TextView sharesText = (TextView) storyView.findViewById(R.id.shared_by);
-		if (sharedUserCount > 0) {
-			sharedBy = String.format(sharedBy, sharedUserCount);
-			sharesText.setText(sharedUserCount > 1 ? sharedBy : sharedBy.substring(0, sharedBy.length() - 1));
-		} else {
-			sharesText.setVisibility(View.INVISIBLE);
-		}
-
-	}
-	
-	public static void setupCommentCount(Context context, View storyView, int sharedCommentCount) {
-        if (context == null || context.getResources() == null) return;
-		String commentsBy = context.getResources().getString(R.string.reading_comment_count);
-		TextView sharesText = (TextView) storyView.findViewById(R.id.comment_by);
-		if (sharedCommentCount > 0) {
-			commentsBy = String.format(commentsBy, sharedCommentCount);
-			sharesText.setText(sharedCommentCount > 1 ? commentsBy : commentsBy.substring(0, commentsBy.length() - 1));
-		} else {
-			sharesText.setVisibility(View.INVISIBLE);
-		}
-	}
-
-	public static ImageView createSharebarImage(final Context context, final ImageLoader imageLoader, final String photoUrl, final String userId) {
+	public static ImageView createSharebarImage(final Context context, final String photoUrl, final String userId) {
 		ImageView image = new ImageView(context);
-		int imageLength = UIUtils.convertDPsToPixels(context, 15);
+		int imageLength = UIUtils.dp2px(context, 15);
 		image.setMaxHeight(imageLength);
 		image.setMaxWidth(imageLength);
 		
@@ -61,7 +38,7 @@ public class ViewUtils {
 		image.setMaxWidth(imageLength);
 		
 		image.setLayoutParams(imageParameters);
-		imageLoader.displayImage(photoUrl, image, 10f);
+		FeedUtils.imageLoader.displayImage(photoUrl, image, 10f);
 		image.setOnClickListener(new OnClickListener() {
 			@Override
 			public void onClick(View view) {
@@ -157,4 +134,15 @@ public class ViewUtils {
                 | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_IMMERSIVE);
     }
+
+    /**
+     * see if Power Save mode is enabled on the device and the UI should disable animations
+     * or other extra features.
+     */
+    public static boolean isPowerSaveMode(Context context) {
+        if (android.os.Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return false;
+        PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+        return pm.isPowerSaveMode();
+    }
+
 }

@@ -80,14 +80,6 @@ AUTO_PREMIUM_NEW_USERS = False
 AUTO_ENABLE_NEW_USERS = True
 PAYPAL_TEST           = False
 
-# ===============
-# = Enviornment =
-# ===============
-
-PRODUCTION  = NEWSBLUR_DIR.find('/home/conesus/newsblur') == 0
-STAGING     = NEWSBLUR_DIR.find('/home/conesus/staging') == 0
-DEVELOPMENT = (NEWSBLUR_DIR.find('/Users/') == 0)
-
 # ===========================
 # = Django-specific Modules =
 # ===========================
@@ -136,7 +128,8 @@ OAUTH2_PROVIDER = {
         'ifttt': 'Pair your NewsBlur account with other IFTTT channels.',
     },
     'CLIENT_ID_GENERATOR_CLASS': 'oauth2_provider.generators.ClientIdGenerator',
-    'ACCESS_TOKEN_EXPIRE_SECONDS': 60*60*24*365*10 # 10 years
+    'ACCESS_TOKEN_EXPIRE_SECONDS': 60*60*24*365*10, # 10 years
+    'AUTHORIZATION_CODE_EXPIRE_SECONDS': 60*60, # 1 hour
 }
 
 # ===========
@@ -177,7 +170,11 @@ LOGGING = {
             'class': 'django.utils.log.AdminEmailHandler',
             'filters': ['require_debug_false'],
             'include_html': True,
-        }
+        },
+        # 'sentry': {
+        #     'level': 'ERROR',
+        #     'class': 'raven.contrib.django.raven_compat.handlers.SentryHandler'
+        # },
     },
     'loggers': {
         'django.request': {
@@ -204,6 +201,16 @@ LOGGING = {
             'level': 'INFO',
             'propagate': True,
         },
+        # 'raven': {
+        #     'level': 'DEBUG',
+        #     'handlers': ['console'],
+        #     'propagate': False,
+        # },
+        # 'sentry.errors': {
+        #     'level': 'DEBUG',
+        #     'handlers': ['console'],
+        #     'propagate': False,
+        # },
     },
     'filters': {
         'require_debug_false': {
@@ -212,13 +219,16 @@ LOGGING = {
     },
 }
 
+logging.getLogger("requests").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+
 # ==========================
 # = Miscellaneous Settings =
 # ==========================
 
 DAYS_OF_UNREAD          = 30
 DAYS_OF_UNREAD_FREE     = 14
-# DoSH can be more, since you can up this value by N, and after N days, 
+# DoSH can be more, since you can up this value by N, and after N days,
 # you can then up the DAYS_OF_UNREAD value with no impact.
 DAYS_OF_STORY_HASHES    = 30
 
@@ -239,10 +249,10 @@ SESSION_COOKIE_AGE      = 60*60*24*365 # 1 year
 SESSION_COOKIE_DOMAIN   = '.newsblur.com'
 SENTRY_DSN              = 'https://XXXNEWSBLURXXX@app.getsentry.com/99999999'
 
-if not DEVELOPMENT:
-    EMAIL_BACKEND = 'django_mailgun.MailgunBackend'
-else:
+if DEBUG:
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+else:
+    EMAIL_BACKEND = 'django_mailgun.MailgunBackend'
 
 # ==============
 # = Subdomains =
@@ -273,6 +283,7 @@ INSTALLED_APPS = (
     'django.contrib.admin',
     'django_extensions',
     'djcelery',
+    # 'kombu.transport.django',
     'vendor.paypal.standard.ipn',
     'apps.rss_feeds',
     'apps.reader',
@@ -311,6 +322,9 @@ ZEBRA_ENABLE_APP = True
 
 import djcelery
 djcelery.setup_loader()
+# from celery import Celery
+# celeryapp = Celery()
+# celeryapp.config_from_object('django.conf:settings')
 CELERY_ROUTES = {
     "work-queue": {
         "queue": "work_queue",
@@ -389,6 +403,7 @@ CELERYD_PREFETCH_MULTIPLIER = 1
 CELERY_IMPORTS              = ("apps.rss_feeds.tasks",
                                "apps.social.tasks",
                                "apps.reader.tasks",
+                               "apps.profile.tasks",
                                "apps.feed_import.tasks",
                                "apps.search.tasks",
                                "apps.statistics.tasks",)
@@ -434,7 +449,7 @@ CELERYBEAT_SCHEDULE = {
     'clean-analytics': {
         'task': 'clean-analytics',
         'schedule': datetime.timedelta(hours=12),
-        'options': {'queue': 'beat_tasks'},
+        'options': {'queue': 'beat_tasks', 'timeout': 720*10},
     },
     'clean-spam': {
         'task': 'clean-spam',
@@ -509,7 +524,7 @@ REDIS_SESSIONS = {
     'host': 'db_redis_sessions',
 }
 
-CELERY_REDIS_DB = 4
+CELERY_REDIS_DB_NUM = 4
 SESSION_REDIS_DB = 5
 
 # =================
@@ -550,21 +565,18 @@ S3_AVATARS_BUCKET_NAME = 'avatars.newsblur.com'
 # ==================
 # = Configurations =
 # ==================
-try:
-    from gunicorn_conf import *
-except ImportError, e:
-    pass
 
 from local_settings import *
 
-if not DEVELOPMENT:
+if not DEBUG:
     INSTALLED_APPS += (
-        'gunicorn',
         'raven.contrib.django',
         'django_ses',
 
     )
+    # RAVEN_CLIENT = raven.Client(dsn=SENTRY_DSN, release=raven.fetch_git_sha(os.path.dirname(__file__)))
     RAVEN_CLIENT = raven.Client(SENTRY_DSN)
+    
 
 COMPRESS = not DEBUG
 TEMPLATE_DEBUG = DEBUG
@@ -628,13 +640,12 @@ MONGO_ANALYTICS_DB = dict(MONGO_ANALYTICS_DB_DEFAULTS, **MONGO_ANALYTICS_DB)
 # MONGOANALYTICSDB = connect(MONGO_ANALYTICS_DB.pop('name'), host=MONGO_ANALYTICS_URI, **MONGO_ANALYTICS_DB)
 MONGOANALYTICSDB = connect(MONGO_ANALYTICS_DB.pop('name'), **MONGO_ANALYTICS_DB)
 
-
 # =========
 # = Redis =
 # =========
 
 BROKER_BACKEND = "redis"
-BROKER_URL = "redis://%s:6379/%s" % (REDIS['host'], CELERY_REDIS_DB)
+BROKER_URL = "redis://%s:6379/%s" % (REDIS['host'], CELERY_REDIS_DB_NUM)
 CELERY_RESULT_BACKEND = BROKER_URL
 SESSION_REDIS_HOST = REDIS_SESSIONS['host']
 
@@ -653,13 +664,21 @@ REDIS_POOL                 = redis.ConnectionPool(host=REDIS['host'], port=6379,
 REDIS_ANALYTICS_POOL       = redis.ConnectionPool(host=REDIS['host'], port=6379, db=2)
 REDIS_STATISTICS_POOL      = redis.ConnectionPool(host=REDIS['host'], port=6379, db=3)
 REDIS_FEED_UPDATE_POOL     = redis.ConnectionPool(host=REDIS['host'], port=6379, db=4)
-# REDIS_STORY_HASH_POOL2   = redis.ConnectionPool(host=REDIS['host'], port=6379, db=8)
+# REDIS_STORY_HASH_POOL2   = redis.ConnectionPool(host=REDIS['host'], port=6379, db=8) # Only used when changing DAYS_OF_UNREAD
 REDIS_STORY_HASH_TEMP_POOL = redis.ConnectionPool(host=REDIS['host'], port=6379, db=10)
 # REDIS_CACHE_POOL         = redis.ConnectionPool(host=REDIS['host'], port=6379, db=6) # Duped in CACHES
-REDIS_SESSION_POOL         = redis.ConnectionPool(host=SESSION_REDIS_HOST, port=6379, db=5)
 REDIS_STORY_HASH_POOL      = redis.ConnectionPool(host=REDIS_STORY['host'], port=6379, db=1)
+REDIS_FEED_READ_POOL       = redis.ConnectionPool(host=SESSION_REDIS_HOST, port=6379, db=1)
 REDIS_FEED_SUB_POOL        = redis.ConnectionPool(host=SESSION_REDIS_HOST, port=6379, db=2)
+REDIS_SESSION_POOL         = redis.ConnectionPool(host=SESSION_REDIS_HOST, port=6379, db=5)
 REDIS_PUBSUB_POOL          = redis.ConnectionPool(host=REDIS_PUBSUB['host'], port=6379, db=0)
+
+# ==========
+# = Celery =
+# ==========
+
+# celeryapp.autodiscover_tasks(INSTALLED_APPS)
+CELERY_ACCEPT_CONTENT = ['pickle', 'json', 'msgpack', 'yaml']
 
 # ==========
 # = Assets =

@@ -7,7 +7,8 @@
 #pragma mark HTTP requests
 
 - (ASIHTTPRequest*) requestWithURL:(NSString*) s {
-	ASIHTTPRequest *request = [ASIHTTPRequest requestWithURL:[NSURL URLWithString:s]];
+    ASIHTTPRequest *request = [ASIHTTPRequest requestWithURL:[NSURL URLWithString:s]];
+    [request setValidatesSecureCertificate:NO];
 	[self addRequest:request];
 	return request;
 }
@@ -104,15 +105,44 @@
     [HUD hide:YES afterDelay:2];
 }
 
+- (void)updateTheme {
+    // Subclasses should override this, calling super, to update their nav bar, table, etc
+}
+
+#pragma mark -
+#pragma mark Keyboard support
+- (void)addKeyCommandWithInput:(NSString *)input modifierFlags:(UIKeyModifierFlags)modifierFlags action:(SEL)action discoverabilityTitle:(NSString *)discoverabilityTitle {
+    UIKeyCommand *keyCommand = [UIKeyCommand keyCommandWithInput:input modifierFlags:modifierFlags action:action];
+    if ([keyCommand respondsToSelector:@selector(discoverabilityTitle)])
+        keyCommand.discoverabilityTitle = discoverabilityTitle;
+    [self addKeyCommand:keyCommand];
+}
+
+- (void)addCancelKeyCommandWithAction:(SEL)action discoverabilityTitle:(NSString *)discoverabilityTitle {
+    [self addKeyCommandWithInput:UIKeyInputEscape modifierFlags:0 action:action discoverabilityTitle:discoverabilityTitle];
+    [self addKeyCommandWithInput:@"." modifierFlags:UIKeyModifierCommand action:action discoverabilityTitle:discoverabilityTitle];
+}
+
 #pragma mark -
 #pragma mark UIViewController
 
 - (void) viewDidLoad {
 	[super viewDidLoad];
+    
+    [[ThemeManager themeManager] addThemeGestureRecognizerToView:self.view];
 }
 
 - (void) viewDidUnload {
 	[super viewDidUnload];
+}
+
+- (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
+    [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
+    
+    if ([self presentedViewController]) {
+        [[self presentedViewController] viewWillTransitionToSize:size
+                                       withTransitionCoordinator:coordinator];
+    }
 }
 
 #pragma mark -

@@ -41,6 +41,8 @@ import com.newsblur.util.FeedUtils;
 import com.newsblur.util.PrefsUtils;
 import com.newsblur.util.StateFilter;
 import com.newsblur.util.StoryOrder;
+import com.newsblur.util.UIUtils;
+import com.newsblur.util.ViewUtils;
 import com.newsblur.view.ProgressThrobber;
 
 public abstract class ItemListFragment extends NbFragment implements OnScrollListener, OnCreateContextMenuListener, LoaderManager.LoaderCallbacks<Cursor>, OnItemClickListener {
@@ -51,9 +53,9 @@ public abstract class ItemListFragment extends NbFragment implements OnScrollLis
 	@FindView(R.id.itemlistfragment_list) ListView itemList;
 	protected StoryItemsAdapter adapter;
     protected DefaultFeedView defaultFeedView;
-	protected StateFilter currentState;
+	protected StateFilter intelState;
     private boolean cursorSeenYet = false;
-    private boolean firstStorySeenYet = false;
+    private boolean stopLoading = false;
     
     // loading indicator for when stories are present but stale (at top of list)
     protected ProgressThrobber headerProgressView;
@@ -65,7 +67,7 @@ public abstract class ItemListFragment extends NbFragment implements OnScrollLis
     @Override
 	public void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
-        currentState = (StateFilter) getArguments().getSerializable("currentState");
+        intelState = PrefsUtils.getStateFilter(getActivity());
         defaultFeedView = (DefaultFeedView)getArguments().getSerializable("defaultFeedView");
         activity = (ItemsList) getActivity();
     }
@@ -75,12 +77,17 @@ public abstract class ItemListFragment extends NbFragment implements OnScrollLis
 		View v = inflater.inflate(R.layout.fragment_itemlist, null);
         ButterKnife.bind(this, v);
 
+        // disable the throbbers if animations are going to have a zero time scale
+        boolean isDisableAnimations = ViewUtils.isPowerSaveMode(activity);
+
+        emptyProgressView.setEnabled(!isDisableAnimations);
         emptyProgressView.setColors(getResources().getColor(R.color.refresh_1),
                                     getResources().getColor(R.color.refresh_2),
                                     getResources().getColor(R.color.refresh_3),
                                     getResources().getColor(R.color.refresh_4));
         View headerView = inflater.inflate(R.layout.row_loading_throbber, null);
         headerProgressView = (ProgressThrobber) headerView.findViewById(R.id.itemlist_loading_throb);
+        headerProgressView.setEnabled(!isDisableAnimations);
         headerProgressView.setColors(getResources().getColor(R.color.refresh_1),
                                      getResources().getColor(R.color.refresh_2),
                                      getResources().getColor(R.color.refresh_3),
@@ -90,6 +97,7 @@ public abstract class ItemListFragment extends NbFragment implements OnScrollLis
 
         View footerView = inflater.inflate(R.layout.row_loading_throbber, null);
         footerProgressView = (ProgressThrobber) footerView.findViewById(R.id.itemlist_loading_throb);
+        footerProgressView.setEnabled(!isDisableAnimations);
         footerProgressView.setColors(getResources().getColor(R.color.refresh_1),
                                      getResources().getColor(R.color.refresh_2),
                                      getResources().getColor(R.color.refresh_3),
@@ -113,6 +121,7 @@ public abstract class ItemListFragment extends NbFragment implements OnScrollLis
     @Override
     public synchronized void onActivityCreated(Bundle savedInstanceState) {
         super.onActivityCreated(savedInstanceState);
+        stopLoading = false;
         if (getLoaderManager().getLoader(ITEMLIST_LOADER) == null) {
             getLoaderManager().initLoader(ITEMLIST_LOADER, null, this);
         }
@@ -124,11 +133,18 @@ public abstract class ItemListFragment extends NbFragment implements OnScrollLis
     }
 
     /**
+     * Signal that all futher cursor loads should be ignored
+     */
+    public void stopLoader() {
+        stopLoading = true;
+    }
+
+    /**
      * Indicate that the DB was cleared.
      */
     public void resetEmptyState() {
         cursorSeenYet = false;
-        firstStorySeenYet = false;
+        FeedUtils.dbHelper.clearStorySession();
     }
 
     /**
@@ -186,6 +202,9 @@ public abstract class ItemListFragment extends NbFragment implements OnScrollLis
 
 	@Override
 	public synchronized void onScroll(AbsListView view, int firstVisible, int visibleCount, int totalCount) {
+        // the framework likes to trigger this on init before we even known counts, so disregard those
+        if (!cursorSeenYet) return;
+
         // load an extra page or two worth of stories past the viewport
         int desiredStoryCount = firstVisible + (visibleCount*2) + 1;
         triggerRefresh(desiredStoryCount, totalCount);
@@ -193,11 +212,6 @@ public abstract class ItemListFragment extends NbFragment implements OnScrollLis
 
 	@Override
 	public void onScrollStateChanged(AbsListView view, int scrollState) { }
-
-	public void changeState(StateFilter state) {
-		currentState = state;
-		hasUpdated();
-	}
 
     protected FeedSet getFeedSet() {
         return activity.getFeedSet();
@@ -211,29 +225,23 @@ public abstract class ItemListFragment extends NbFragment implements OnScrollLis
 
 	@Override
 	public Loader<Cursor> onCreateLoader(int arg0, Bundle arg1) {
-		return FeedUtils.dbHelper.getStoriesLoader(getFeedSet(), currentState);
+        FeedSet fs = getFeedSet();
+        if (fs == null) {
+            Log.e(this.getClass().getName(), "can't create fragment, no feedset ready");
+            // this is probably happening in a finalisation cycle or during a crash, pop the activity stack
+            try { getActivity().finish(); } catch (Exception e) {;}
+            return null;
+        }
+		return FeedUtils.dbHelper.getActiveStoriesLoader(getFeedSet());
 	}
 
     @Override
 	public synchronized void onLoadFinished(Loader<Cursor> loader, Cursor cursor) {
+        if (stopLoading) return;
 		if (cursor != null) {
             cursorSeenYet = true;
             if (cursor.getCount() < 1) {
                 triggerRefresh(1, 0);
-            } else {
-                if (!firstStorySeenYet) {
-                    // once we have at least a single story, we can instruct the sync service as to how to safely
-                    // activate new stories we recieve
-                    firstStorySeenYet = true;
-                    cursor.moveToFirst();
-                    long cutoff = cursor.getLong(cursor.getColumnIndex(DatabaseConstants.STORY_TIMESTAMP));
-                    cursor.moveToPosition(-1);
-                    if (activity.getStoryOrder() == StoryOrder.NEWEST) {
-                        NBSyncService.setActivationMode(NBSyncService.ActivationMode.OLDER, cutoff);
-                    } else {
-                        NBSyncService.setActivationMode(NBSyncService.ActivationMode.NEWER, cutoff);
-                    }
-                }
             }
             adapter.swapCursor(cursor);
 		}
@@ -298,7 +306,11 @@ public abstract class ItemListFragment extends NbFragment implements OnScrollLis
             return true;
 
         case R.id.menu_send_story:
-            FeedUtils.sendStory(story, activity);
+            FeedUtils.sendStoryBrief(story, activity);
+            return true;
+
+        case R.id.menu_send_story_full:
+            FeedUtils.sendStoryFull(story, activity);
             return true;
 
         case R.id.menu_save_story:
@@ -316,12 +328,12 @@ public abstract class ItemListFragment extends NbFragment implements OnScrollLis
     }
 
 	@Override
-	public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+	public synchronized void onItemClick(AdapterView<?> parent, View view, int position, long id) {
         int truePosition = position - 1;
-        onItemClick_(parent, view, truePosition, id);
+        Story story = adapter.getStory(truePosition);
+        if (getActivity().isFinishing()) return;
+        UIUtils.startReadingActivity(getFeedSet(), story.storyHash, getActivity());
     }
-
-	public abstract void onItemClick_(AdapterView<?> parent, View view, int position, long id);
 
     protected void setupBezelSwipeDetector(View v) {
         final GestureDetector gestureDetector = new GestureDetector(getActivity(), new BezelSwipeDetector());

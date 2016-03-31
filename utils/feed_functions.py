@@ -6,9 +6,12 @@ import pprint
 import urllib
 import urlparse
 import random
+import warnings
 from django.core.mail import mail_admins
 from django.utils.translation import ungettext
+from django.utils.encoding import smart_unicode
 from utils import log as logging
+
 
 class TimeoutError(Exception): pass
 def timelimit(timeout):
@@ -46,33 +49,9 @@ def timelimit(timeout):
 def utf8encode(tstr):
     """ Encodes a unicode string in utf-8
     """
-    if not tstr:
-        return u''
-    # this is _not_ pretty, but it works
-    try:
-        return unicode(tstr.encode('utf-8', "xmlcharrefreplace"))
-    except UnicodeDecodeError:
-        # it's already UTF8.. sigh
-        try:
-            return unicode(tstr.decode('utf-8').encode('utf-8'))
-        except UnicodeDecodeError:
-            return u''
-
-def append_query_string_to_url(url, **kwargs):
-    url_parts = list(urlparse.urlparse(url))
-    query = dict(urlparse.parse_qsl(url_parts[4]))
-
-    if not url_parts[4] or (url_parts[4] and len(query.keys())):
-        # Ensure query string is preserved.
-        # ?atom should be preserved, so ignore
-        # ?feed=atom is fine
-        query.update(kwargs)
-        url_parts[4] = urllib.urlencode(query)
-
-    return urlparse.urlunparse(url_parts)
-    
-def cache_bust_url(url):
-    return append_query_string_to_url(url, _=random.randint(0, 10000))
+    msg = "utf8encode is deprecated. Use django.utils.encoding.smart_unicode instead."
+    warnings.warn(msg, DeprecationWarning)
+    return smart_unicode(tstr)
 
 # From: http://www.poromenos.org/node/87
 def levenshtein_distance(first, second):

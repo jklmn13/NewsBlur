@@ -59,7 +59,7 @@
         return NO;
     }
 
-    if (![appDelegate isReachabileForOffline]) {
+    if (![appDelegate isReachableForOffline]) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [appDelegate.feedsViewController showDoneNotifier];
             [appDelegate.feedsViewController hideNotifier];
@@ -75,6 +75,7 @@
         NSString *storyTimestamp = [urlArray objectAtIndex:2];
         
         ASIHTTPRequest *request = [ASIHTTPRequest requestWithURL:url];
+        [request setValidatesSecureCertificate:NO];
         [request setUserInfo:@{@"story_hash": storyHash, @"story_timestamp": storyTimestamp}];
         [request setDelegate:self];
         [request setDidFinishSelector:@selector(storeCachedImage:)];

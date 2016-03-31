@@ -2,6 +2,7 @@ NEWSBLUR.ReaderFeedchooser = function(options) {
     options = options || {};
     var defaults = {
         'width': options.premium_only || options.chooser_only ? 460 : 900,
+        'height': 750,
         'premium_only': false,
         'chooser_only': false,
         'onOpen': _.bind(function() {
@@ -76,7 +77,8 @@ _.extend(NEWSBLUR.ReaderFeedchooser.prototype, {
                       $.make('b', { style: 'display: block; margin: 8px 0' }, [
                           $.make('span', { className: 'NB-raquo' }, '&raquo;'),
                           ' ',
-                          NEWSBLUR.Globals.premium_expire && NEWSBLUR.utils.format_date(NEWSBLUR.Globals.premium_expire)
+                          NEWSBLUR.Globals.premium_expire && NEWSBLUR.utils.format_date(NEWSBLUR.Globals.premium_expire),
+                          (!NEWSBLUR.Globals.premium_expire && $.make('b', "Never gonna expire. Congrats!"))
                       ]),
                       'You can change your payment method and card details. ',
                       (NEWSBLUR.Globals.premium_expire < new Date) ? 
@@ -117,9 +119,13 @@ _.extend(NEWSBLUR.ReaderFeedchooser.prototype, {
                 ]),
                 $.make('li', { className: 'NB-7' }, [
                   $.make('div', { className: 'NB-feedchooser-premium-bullet-image' }),
-                  'Text view conveniently extracts the story'
+                  'Custom RSS feeds for folders and saved stories'
                 ]),
                 $.make('li', { className: 'NB-8' }, [
+                  $.make('div', { className: 'NB-feedchooser-premium-bullet-image' }),
+                  'Text view conveniently extracts the story'
+                ]),
+                $.make('li', { className: 'NB-9' }, [
                   $.make('div', { className: 'NB-feedchooser-premium-bullet-image' }),
                   'You feed Shiloh, my poor, hungry dog, for ',
                   $.make('span', { className: 'NB-feedchooser-hungry-dog' }, '6 days'),
@@ -198,7 +204,7 @@ _.extend(NEWSBLUR.ReaderFeedchooser.prototype, {
               (this.options.chooser_only && $.make('div', { className: 'NB-feedchooser-info' }, [
                     $.make('h2', { className: 'NB-modal-title' }, [
                         $.make('div', { className: 'NB-icon' }),
-                        'Mute feeds',
+                        'Mute sites',
                         $.make('div', { className: 'NB-icon-dropdown' })
                     ]),
                     $.make('div', { className: 'NB-feedchooser-info-reset NB-splash-link'}, 'Turn every site on'),

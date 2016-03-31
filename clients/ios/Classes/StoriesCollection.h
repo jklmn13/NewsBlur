@@ -6,7 +6,7 @@
 //  Copyright (c) 2014 NewsBlur. All rights reserved.
 //
 
-#import <Foundation/Foundation.h>
+#import "NewsBlurAppDelegate.h"
 
 @interface StoriesCollection : NSObject {
     NSDictionary * activeFeed;
@@ -99,7 +99,8 @@
 - (void)markStoryUnread:(NSString *)storyId feedId:(id)feedId;
 - (void)markStoryUnread:(NSDictionary *)story feed:(NSDictionary *)feed;
 
-- (NSDictionary *)markStory:story asSaved:(BOOL)saved;
+- (NSDictionary *)markStory:(NSDictionary *)story asSaved:(BOOL)saved;
+- (NSDictionary *)markStory:(NSDictionary *)story asSaved:(BOOL)saved forceUpdate:(BOOL)forceUpdate;
 - (void)toggleStorySaved;
 - (BOOL)toggleStorySaved:(NSDictionary *)story;
 - (void)syncStoryAsSaved:(NSDictionary *)story;

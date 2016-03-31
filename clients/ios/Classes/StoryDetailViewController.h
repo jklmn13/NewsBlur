@@ -26,11 +26,15 @@ UIActionSheetDelegate> {
     BOOL pullingScrollview;
     BOOL inTextView;
     BOOL inDoubleTap;
+    BOOL hasScrolled;
     NSURL *activeLongPressUrl;
     NSInteger actionSheetViewImageIndex;
     NSInteger actionSheetCopyImageIndex;
     NSInteger actionSheetSaveImageIndex;
     CGSize preRotateSize;
+    CGFloat scrollPct;
+    
+    UIInterfaceOrientation _orientation;
 }
 
 @property (nonatomic) IBOutlet NewsBlurAppDelegate *appDelegate;
@@ -40,9 +44,12 @@ UIActionSheetDelegate> {
 @property (nonatomic) IBOutlet UIWebView *webView;
 @property (nonatomic) IBOutlet UIView *feedTitleGradient;
 @property (nonatomic) IBOutlet UIView *noStoryMessage;
+@property (nonatomic) IBOutlet UIActivityIndicatorView *activityIndicator;
+
 @property (nonatomic, assign) BOOL pullingScrollview;
 @property (nonatomic, assign) BOOL inTextView;
 @property (nonatomic, assign) BOOL isRecentlyUnread;
+@property (nonatomic) BOOL hasStory;
 
 @property NSInteger pageIndex;
 @property (nonatomic) MBProgressHUD *storyHUD;
@@ -51,6 +58,7 @@ UIActionSheetDelegate> {
 - (void)hideNoStoryMessage;
 - (void)drawStory;
 - (void)drawStory:(BOOL)force withOrientation:(UIInterfaceOrientation)orientation;
+- (void)drawFeedGradient;
 - (void)showStory;
 - (void)clearStory;
 - (void)hideStory;
@@ -58,6 +66,7 @@ UIActionSheetDelegate> {
 - (void)toggleLikeComment:(BOOL)likeComment;
 - (void)flashCheckmarkHud:(NSString *)messageType;
 - (void)scrolltoComment;
+- (void)tryScrollingDown:(BOOL)down;
 - (void)changeWebViewWidth;
 - (void)showUserProfile:(NSString *)userId xCoordinate:(int)x yCoordinate:(int)y width:(int)width height:(int)height;
 - (void)checkTryFeedStory;
@@ -85,6 +94,7 @@ UIActionSheetDelegate> {
 
 - (CGPoint)pointForGesture:(UIGestureRecognizer *)gestureRecognizer;
 
+- (void)showTextOrStoryView;
 - (void)showStoryView;
 - (void)fetchTextView;
 - (void)finishFetchTextView:(ASIHTTPRequest *)request;

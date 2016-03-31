@@ -11,7 +11,8 @@
   <meta name="msapplication-TileImage" content="{{ MEDIA_URL }}img/logo_144.png" />
   <meta name="msapplication-TileColor" content="#F7E5A8"/>
   <meta name="apple-itunes-app" content="app-id=463981119">
-
+  <link rel="mask-icon" href="{{ MEDIA_URL }}img/favicon_monochrome.svg" color="orange">
+  
   <script type="text/javascript" charset="utf-8">
     window.NEWSBLUR = {};
     NEWSBLUR.Globals = {
@@ -58,7 +59,6 @@
       'ssl'                     : 0,
       'open_feed_action'        : 'newest',
       'read_story_delay'        : 0,
-      'hide_story_changes'      : 1,
       'feed_view_single_story'  : 0,
       'animations'              : true,
       'dateformat'              : "12",
@@ -80,6 +80,7 @@
       'truncate_story'          : 'social',
       'autoopen_folder'         : false,
       'show_content_preview'    : true,
+      'show_image_preview'      : true,
       'mark_read_on_scroll_titles' : false,
       'doubleclick_feed'        : 'open',
       'doubleclick_unread'      : 'markread',
@@ -99,7 +100,8 @@
       'opml-export'             : "{% url "opml-export" %}",
       'domain'                  : "{% current_domain %}",
       'favicon'                 : "/rss_feeds/icon/{id}",
-      'delete-account'          : "{% url "profile-delete-account" %}"
+      'delete-account'          : "{% url "profile-delete-account" %}",
+      'folder_rss'              : "/reader/folder_rss/{user_id}/{secret_token}/{unread_filter}/{folder_title}"
     };
     NEWSBLUR.Models = {};
     NEWSBLUR.Collections = {};

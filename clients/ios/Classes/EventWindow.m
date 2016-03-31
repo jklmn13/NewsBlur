@@ -28,11 +28,11 @@
 }
 
 - (void)sendEvent:(UIEvent *)event {
-    NSSet *touches = [event touchesForWindow:self];
-    
     [super sendEvent:event];    // Call super to make sure the event is processed as usual
     
     if (!tapDetectingView) return;
+
+    NSSet *touches = [event touchesForWindow:self];
     
     if ([touches count] == 1) { // We're only interested in one-finger events
         UITouch *touch = [touches anyObject];
@@ -56,12 +56,22 @@
                 
             case UITouchPhaseEnded:
                 [contextualMenuTimer invalidate];
+                contextualMenuTimer = nil;
                 if (unmoved) {
                     [self tapAction];
                 }
                 break;
 
-            case UITouchPhaseMoved:
+            case UITouchPhaseMoved: // Changes in force are also "moves"
+                if (CGPointEqualToPoint([touch locationInView:self], tapLocation)) {
+                    
+                    if ([touch respondsToSelector:@selector(force)] && (touch.force / touch.maximumPossibleForce) > 0.75) {
+                        [contextualMenuTimer invalidate];
+                        contextualMenuTimer = nil;
+                        [self tapAndHoldAction:nil];
+                    }
+                    break;
+                }
             case UITouchPhaseCancelled:
                 unmoved = NO;
                 [contextualMenuTimer invalidate];

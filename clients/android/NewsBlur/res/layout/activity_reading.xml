@@ -3,16 +3,21 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent" >
 
+    <TextView
+        android:id="@+id/reading_empty_view_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentTop="true"
+        android:layout_marginTop="40dp"
+        android:gravity="center_horizontal"
+        android:text="@string/loading"
+        style="?explainerText"
+        android:textSize="16sp" />
+
     <android.support.v4.view.ViewPager
         android:id="@+id/reading_pager"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
-
-    <View
-        android:id="@+id/reading_divider"
-        android:layout_width="fill_parent"
-        android:layout_height="1dip"
-        android:layout_alignParentTop="true" />
 
     <LinearLayout
         android:layout_width="wrap_content"
@@ -112,5 +117,17 @@
         android:layout_alignParentBottom="true"
         android:layout_alignParentLeft="true"
         android:indeterminate="true" />
+
+    <TextView
+        android:id="@+id/reading_sync_status"
+        android:layout_width="fill_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:padding="1dp"
+        android:textSize="13sp"
+        android:gravity="center"
+        android:textColor="@color/status_overlay_text"
+        android:background="@color/status_overlay_background"
+        android:visibility="gone" />
 
 </RelativeLayout>

@@ -47,7 +47,7 @@ def load_social_stories(request, user_id, username=None):
     page           = request.REQUEST.get('page')
     order          = request.REQUEST.get('order', 'newest')
     read_filter    = request.REQUEST.get('read_filter', 'all')
-    query          = request.REQUEST.get('query')
+    query          = request.REQUEST.get('query', '').strip()
     stories        = []
     message        = None
     
@@ -132,7 +132,9 @@ def load_social_stories(request, user_id, username=None):
         story['long_parsed_date'] = format_story_link_date__long(shared_date, nowtz)
         
         story['read_status'] = 1
-        if (read_filter == 'all' or query) and socialsub:
+        if story['story_date'] < user.profile.unread_cutoff:
+            story['read_status'] = 1
+        elif (read_filter == 'all' or query) and socialsub:
             story['read_status'] = 1 if story['story_hash'] not in unread_story_hashes else 0
         elif read_filter == 'unread' and socialsub:
             story['read_status'] = 0
@@ -549,6 +551,13 @@ def mark_story_as_shared(request):
             'message': 'Could not find the original story and no copies could be found.'
         })
     
+    feed = Feed.get_by_id(feed_id)
+    if feed and feed.is_newsletter:
+        return json.json_response(request, {
+            'code': -1, 
+            'message': 'You cannot share newsletters. Somebody could unsubscribe you!'
+        })
+        
     if not request.user.profile.is_premium and MSharedStory.feed_quota(request.user.pk, feed_id, story.story_hash):
         return json.json_response(request, {
             'code': -1, 
@@ -1230,7 +1239,6 @@ def remove_like_comment(request):
                                             story_guid=story_id)
     shared_story.remove_liking_user(request.user.pk)
     comment, profiles = shared_story.comment_with_author_and_profiles()
-    
     comment_user = User.objects.get(pk=shared_story.user_id)
     logging.user(request, "~BB~FMRemoving like on comment by ~SB%s~SN: %s" % (
         comment_user.username, 
@@ -1357,6 +1365,8 @@ def load_social_statistics(request, social_user_id, username=None):
     # Stories per month - average and month-by-month breakout
     stats['average_stories_per_month'] = social_profile.average_stories_per_month
     stats['story_count_history'] = social_profile.story_count_history
+    stats['story_hours_history'] = social_profile.story_hours_history
+    stats['story_days_history'] = social_profile.story_days_history
     
     # Subscribers
     stats['subscriber_count'] = social_profile.follower_count

@@ -8,13 +8,13 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.Color;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.app.DialogFragment;
-import android.app.Fragment;
 import android.text.Html;
 import android.text.TextUtils;
 import android.util.Log;
@@ -28,7 +28,6 @@ import android.view.ViewGroup;
 import android.webkit.WebView.HitTestResult;
 import android.widget.Button;
 import android.widget.ImageView;
-import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import butterknife.ButterKnife;
@@ -36,7 +35,7 @@ import butterknife.FindView;
 import butterknife.OnClick;
 
 import com.newsblur.R;
-import com.newsblur.activity.NewsBlurApplication;
+import com.newsblur.activity.NbActivity;
 import com.newsblur.activity.Reading;
 import com.newsblur.domain.Classifier;
 import com.newsblur.domain.Story;
@@ -45,7 +44,6 @@ import com.newsblur.service.NBSyncService;
 import com.newsblur.util.DefaultFeedView;
 import com.newsblur.util.FeedUtils;
 import com.newsblur.util.ImageCache;
-import com.newsblur.util.ImageLoader;
 import com.newsblur.util.PrefsUtils;
 import com.newsblur.util.StoryUtils;
 import com.newsblur.util.UIUtils;
@@ -58,8 +56,6 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.HashSet;
-import java.util.Set;
 
 public class ReadingItemFragment extends NbFragment implements ClassifierDialogFragment.TagUpdateCallback {
 
@@ -67,7 +63,6 @@ public class ReadingItemFragment extends NbFragment implements ClassifierDialogF
 	public static final String TEXT_SIZE_VALUE = "textSizeChangeValue";
 	public Story story;
 	private LayoutInflater inflater;
-	private ImageLoader imageLoader;
 	private String feedColor, feedTitle, feedFade, feedBorder, feedIconUrl, faviconText;
 	private Classifier classifier;
 	@FindView(R.id.reading_webview) NewsblurWebview web;
@@ -77,10 +72,9 @@ public class ReadingItemFragment extends NbFragment implements ClassifierDialogF
     @FindView(R.id.reading_item_authors) TextView itemAuthors;
 	@FindView(R.id.reading_feed_title) TextView itemFeed;
 	private boolean displayFeedDetails;
-	private FlowLayout tagContainer;
+	@FindView(R.id.reading_item_tags) FlowLayout tagContainer;
 	private View view;
 	private UserDetails user;
-	private ImageView feedIcon;
     private Reading activity;
     private DefaultFeedView selectedFeedView;
     @FindView(R.id.save_story_button) Button saveButton;
@@ -136,7 +130,6 @@ public class ReadingItemFragment extends NbFragment implements ClassifierDialogF
 	@Override
 	public void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
-		imageLoader = ((NewsBlurApplication) getActivity().getApplicationContext()).getImageLoader();
 		story = getArguments() != null ? (Story) getArguments().getSerializable("story") : null;
 
 		inflater = getActivity().getLayoutInflater();
@@ -194,6 +187,16 @@ public class ReadingItemFragment extends NbFragment implements ClassifierDialogF
 	public View onCreateView(final LayoutInflater inflater, final ViewGroup container, final Bundle savedInstanceState) {
         view = inflater.inflate(R.layout.fragment_readingitem, null);
         ButterKnife.bind(this, view);
+
+        // the share/save buttons us compound drawables for layout speed, but they
+        // cannot correctly compute padding.  hard resize the icons to use padding.
+        int iconSizePx = UIUtils.dp2px(this.activity, 30);
+        Drawable shareButtonIcon = shareButton.getCompoundDrawables()[0];
+        shareButtonIcon.setBounds(0, 0, iconSizePx, iconSizePx);
+        shareButton.setCompoundDrawables(shareButtonIcon, null, null, null);
+        Drawable saveButtonIcon = saveButton.getCompoundDrawables()[0];
+        saveButtonIcon.setBounds(0, 0, iconSizePx, iconSizePx);
+        saveButton.setCompoundDrawables(saveButtonIcon, null, null, null);
 
         registerForContextMenu(web);
         web.setCustomViewLayout(webviewCustomViewLayout);
@@ -300,7 +303,7 @@ public class ReadingItemFragment extends NbFragment implements ClassifierDialogF
 	}
 
     private void setupItemCommentsAndShares() {
-        new SetupCommentSectionTask(this, view, inflater, story, imageLoader).execute();
+        new SetupCommentSectionTask(this, view, inflater, story).execute();
     }
 
 	private void setupItemMetadata() {
@@ -308,7 +311,7 @@ public class ReadingItemFragment extends NbFragment implements ClassifierDialogF
         View feedHeaderBorder = view.findViewById(R.id.item_feed_border);
         TextView itemTitle = (TextView) view.findViewById(R.id.reading_item_title);
         TextView itemDate = (TextView) view.findViewById(R.id.reading_item_date);
-        feedIcon = (ImageView) view.findViewById(R.id.reading_feed_icon);
+        ImageView feedIcon = (ImageView) view.findViewById(R.id.reading_feed_icon);
 
 		if (TextUtils.equals(feedColor, "#null") || TextUtils.equals(feedFade, "#null")) {
             feedColor = "#303030";
@@ -318,7 +321,7 @@ public class ReadingItemFragment extends NbFragment implements ClassifierDialogF
 
         int[] colors = {
             Color.parseColor(feedColor),
-            Color.parseColor(feedFade)
+            Color.parseColor(feedFade),
         };
         GradientDrawable gradient = new GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
                 colors);
@@ -337,7 +340,7 @@ public class ReadingItemFragment extends NbFragment implements ClassifierDialogF
 			itemFeed.setVisibility(View.GONE);
 			feedIcon.setVisibility(View.GONE);
 		} else {
-			imageLoader.displayImage(feedIconUrl, feedIcon, false);
+			FeedUtils.imageLoader.displayImage(feedIconUrl, feedIcon, false);
 			itemFeed.setText(feedTitle);
 		}
 
@@ -352,7 +355,6 @@ public class ReadingItemFragment extends NbFragment implements ClassifierDialogF
         }
 
         if (story.tags.length <= 0) {
-            tagContainer = (FlowLayout) view.findViewById(R.id.reading_item_tags);
             tagContainer.setVisibility(View.GONE);
         }
 
@@ -391,7 +393,6 @@ public class ReadingItemFragment extends NbFragment implements ClassifierDialogF
 	}
 
 	private void setupTags() {
-		tagContainer = (FlowLayout) view.findViewById(R.id.reading_item_tags);
         ViewUtils.setupTags(getActivity());
 		for (String tag : story.tags) {
 			View v = ViewUtils.createTagView(inflater, getFragmentManager(), tag, classifier, this, story.feedId);
@@ -453,11 +454,17 @@ public class ReadingItemFragment extends NbFragment implements ClassifierDialogF
         this.story = story;
     }
 
-    public void handleUpdate() {
-        updateSaveButton();
-        updateShareButton();
-        reloadStoryContent();
-        setupItemCommentsAndShares();
+    public void handleUpdate(int updateType) {
+        if ((updateType & NbActivity.UPDATE_STORY) != 0) {
+            updateSaveButton();
+            updateShareButton();
+        }
+        if ((updateType & NbActivity.UPDATE_TEXT) != 0) {
+            reloadStoryContent();
+        }
+        if ((updateType & NbActivity.UPDATE_SOCIAL) != 0) {
+            setupItemCommentsAndShares();
+        }
     }
 
     private void loadOriginalText() {
@@ -518,9 +525,7 @@ public class ReadingItemFragment extends NbFragment implements ClassifierDialogF
             
             sniffAltTexts(storyText);
 
-            if (PrefsUtils.isImagePrefetchEnabled(getActivity())) {
-                storyText = swapInOfflineImages(storyText);
-            } 
+            storyText = swapInOfflineImages(storyText);
 
             float currentSize = PrefsUtils.getTextSize(getActivity());
 

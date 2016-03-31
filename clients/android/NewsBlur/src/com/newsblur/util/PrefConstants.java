@@ -47,6 +47,7 @@ public class PrefConstants {
     public static final String SAVED_STORIES_FOLDER_NAME = "saved_stories";
     public static final String READING_ENTER_IMMERSIVE_SINGLE_TAP = "immersive_enter_single_tap";
 
+    public static final String STORIES_AUTO_OPEN_FIRST = "pref_auto_open_first_unread";
     public static final String STORIES_SHOW_PREVIEWS = "pref_show_content_preview";
 
     public static final String ENABLE_OFFLINE = "enable_offline";
@@ -66,4 +67,5 @@ public class PrefConstants {
     public static final String LAST_CLEANUP_TIME = "last_cleanup_time";
 
     public static final String VOLUME_KEY_NAVIGATION = "volume_key_navigation";
+    public static final String MARK_ALL_READ_CONFIRMATION = "pref_confirm_mark_all_read";
 }

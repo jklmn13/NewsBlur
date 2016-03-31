@@ -6,6 +6,7 @@ import com.newsblur.util.AppConstants;
 import com.newsblur.util.ImageCache;
 import com.newsblur.util.PrefsUtils;
 
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -17,7 +18,7 @@ public class ImagePrefetchService extends SubService {
 
     /** URLs of images contained in recently fetched stories that are candidates for prefetch. */
     static Set<String> ImageQueue;
-    static { ImageQueue = new HashSet<String>(); }
+    static { ImageQueue = Collections.synchronizedSet(new HashSet<String>()); }
 
     public ImagePrefetchService(NBSyncService parent) {
         super(parent);
@@ -32,7 +33,10 @@ public class ImagePrefetchService extends SubService {
 
         gotWork();
 
-        while ((ImageQueue.size() > 0) && PrefsUtils.isImagePrefetchEnabled(parent)) {
+        while (ImageQueue.size() > 0) {
+            if (! PrefsUtils.isImagePrefetchEnabled(parent)) return;
+            if (! PrefsUtils.isBackgroundNetworkAllowed(parent)) return;
+
             startExpensiveCycle();
             // on each batch, re-query the DB for images associated with yet-unread stories
             // this is a bit expensive, but we are running totally async at a really low priority

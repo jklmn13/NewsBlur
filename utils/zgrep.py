@@ -40,7 +40,7 @@ def main(role="app", role2="work", command=None, path=None):
 
 def create_streams_for_roles(role, role2, command=None, path=None):
     streams = list()
-    hosts = fabfile.do(split=True)
+    hosts = fabfile.assign_digitalocean_roledefs(split=True)
     found = set()
 
     if not path:
@@ -95,9 +95,11 @@ if __name__ == "__main__":
     parser = OptionParser()
     parser.add_option("-f", "--find", dest="find")
     parser.add_option("-p", "--path", dest="path")
+    parser.add_option("-r", "--role", dest="role")
     (options, args) = parser.parse_args()
 
     path = options.path
     find = options.find
+    role = options.role or 'app'
     command = "zgrep \"%s\"" % find
-    main(role="app", command=command, path=path)
+    main(role=role, command=command, path=path)

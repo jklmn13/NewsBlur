@@ -13,6 +13,7 @@ from django.db.models import Count
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.cache import cache
+from django.template.defaultfilters import slugify
 from mongoengine.queryset import OperationError
 from mongoengine.queryset import NotUniqueError
 from apps.reader.managers import UserSubscriptionManager
@@ -120,13 +121,16 @@ class UserSubscription(models.Model):
             feed_ids = [sub.feed_id for sub in usersubs]
             if not feed_ids:
                 return story_hashes
-
-        read_dates = dict((us.feed_id, int(us.mark_read_date.strftime('%s'))) for us in usersubs)
+        
         current_time = int(time.time() + 60*60*24)
         if not cutoff_date:
             cutoff_date = datetime.datetime.now() - datetime.timedelta(days=settings.DAYS_OF_STORY_HASHES)
         unread_timestamp = int(time.mktime(cutoff_date.timetuple()))-1000
         feed_counter = 0
+
+        read_dates = dict()
+        for us in usersubs:
+            read_dates[us.feed_id] = int(max(us.mark_read_date, cutoff_date).strftime('%s'))
 
         for feed_id_group in chunks(feed_ids, 20):
             pipeline = r.pipeline()
@@ -145,7 +149,7 @@ class UserSubscription(models.Model):
                     pipeline.sdiffstore(unread_stories_key, stories_key, read_stories_key)
                     expire_unread_stories_key = True
                 else:
-                    min_score = unread_timestamp
+                    min_score = 0
                     unread_stories_key = stories_key
 
                 if order == 'oldest':
@@ -210,12 +214,11 @@ class UserSubscription(models.Model):
         
         current_time = int(time.time() + 60*60*24)
         if not cutoff_date:
+            cutoff_date = datetime.datetime.now() - datetime.timedelta(days=settings.DAYS_OF_UNREAD)
             if read_filter == "unread":
-                cutoff_date = self.mark_read_date
+                cutoff_date = max(cutoff_date, self.mark_read_date)
             elif default_cutoff_date:
                 cutoff_date = default_cutoff_date
-            else:
-                cutoff_date = datetime.datetime.now() - datetime.timedelta(days=settings.DAYS_OF_UNREAD)
 
         if order == 'oldest':
             byscorefunc = rt.zrangebyscore
@@ -260,7 +263,7 @@ class UserSubscription(models.Model):
     @classmethod
     def feed_stories(cls, user_id, feed_ids=None, offset=0, limit=6, 
                      order='newest', read_filter='all', usersubs=None, cutoff_date=None,
-                     all_feed_ids=None):
+                     all_feed_ids=None, cache_prefix=""):
         rt = redis.Redis(connection_pool=settings.REDIS_STORY_HASH_TEMP_POOL)
         across_all_feeds = False
         
@@ -277,8 +280,8 @@ class UserSubscription(models.Model):
         
         # feeds_string = ""
         feeds_string = ','.join(str(f) for f in sorted(all_feed_ids))[:30]
-        ranked_stories_keys         = 'zU:%s:feeds:%s'  % (user_id, feeds_string)
-        unread_ranked_stories_keys  = 'zhU:%s:feeds:%s' % (user_id, feeds_string)
+        ranked_stories_keys         = '%szU:%s:feeds:%s'  % (cache_prefix, user_id, feeds_string)
+        unread_ranked_stories_keys  = '%szhU:%s:feeds:%s' % (cache_prefix, user_id, feeds_string)
         stories_cached = rt.exists(ranked_stories_keys)
         unreads_cached = True if read_filter == "unread" else rt.exists(unread_ranked_stories_keys)
         if offset and stories_cached and unreads_cached:
@@ -291,7 +294,7 @@ class UserSubscription(models.Model):
         else:
             rt.delete(ranked_stories_keys)
             rt.delete(unread_ranked_stories_keys)
-        
+
         story_hashes = cls.story_hashes(user_id, feed_ids=feed_ids, 
                                         read_filter=read_filter, order=order, 
                                         include_timestamps=True,
@@ -599,9 +602,14 @@ class UserSubscription(models.Model):
                 cutoff_date = datetime.datetime.utcnow()
                 recount = False
         
-        self.last_read_date = cutoff_date
-        self.mark_read_date = cutoff_date
-        self.oldest_unread_story_date = cutoff_date
+        if cutoff_date > self.mark_read_date or cutoff_date > self.oldest_unread_story_date:
+            self.last_read_date = cutoff_date
+            self.mark_read_date = cutoff_date
+            self.oldest_unread_story_date = cutoff_date
+        else:
+            logging.user(self.user, "Not marking %s as read: %s > %s/%s" % 
+                         (self, cutoff_date, self.mark_read_date, self.oldest_unread_story_date))
+        
         if not recount:
             self.unread_count_negative = 0
             self.unread_count_positive = 0
@@ -643,6 +651,7 @@ class UserSubscription(models.Model):
             logging.user(request, "~FYRead %s stories in feed: %s" % (len(story_hashes), self.feed))
         else:
             logging.user(request, "~FYRead story in feed: %s" % (self.feed))
+            RUserStory.aggregate_mark_read(self.feed_id)
         
         for story_hash in set(story_hashes):
             RUserStory.mark_read(self.user_id, self.feed_id, story_hash, aggregated=aggregated)
@@ -683,6 +692,7 @@ class UserSubscription(models.Model):
         ont = self.unread_count_neutral
         ops = self.unread_count_positive
         oousd = self.oldest_unread_story_date
+        ucu = self.unread_count_updated
         onur = self.needs_unread_recalc
         oit = self.is_trained
         
@@ -790,6 +800,7 @@ class UserSubscription(models.Model):
         if self.unread_count_positive != ops: update_fields.append('unread_count_positive')
         if self.unread_count_neutral != ont: update_fields.append('unread_count_neutral')
         if self.unread_count_negative != ong: update_fields.append('unread_count_negative')
+        if self.unread_count_updated != ucu: update_fields.append('unread_count_updated')
         if self.oldest_unread_story_date != oousd: update_fields.append('oldest_unread_story_date')
         if self.needs_unread_recalc != onur: update_fields.append('needs_unread_recalc')
         if self.is_trained != oit: update_fields.append('is_trained')
@@ -997,10 +1008,15 @@ class RUserStory:
         if not isinstance(story_hashes, list):
             story_hashes = [story_hashes]
         
+        single_story = len(story_hashes) == 1
+        
         for story_hash in story_hashes:
             feed_id, _ = MStory.split_story_hash(story_hash)
             feed_ids.add(feed_id)
-
+            
+            if single_story:
+                cls.aggregate_mark_read(feed_id)
+            
             # Find other social feeds with this story to update their counts
             friend_key = "F:%s:F" % (user_id)
             share_key = "S:%s" % (story_hash)
@@ -1033,6 +1049,19 @@ class RUserStory:
         cls.mark_unread(user_id, feed_id, story_hash, social_user_ids=friends_with_shares, r=r)
         
         return feed_id, list(friend_ids)
+    
+    @classmethod
+    def aggregate_mark_read(cls, feed_id):
+        if not feed_id:
+            logging.debug(" ***> ~BR~FWNo feed_id on aggregate mark read. Ignoring.")
+            return
+            
+        r = redis.Redis(connection_pool=settings.REDIS_FEED_READ_POOL)
+        week_of_year = datetime.datetime.now().strftime('%Y-%U')
+        feed_read_key = "fR:%s:%s" % (feed_id, week_of_year)
+        
+        r.incr(feed_read_key)
+        r.expire(feed_read_key, 2*settings.DAYS_OF_STORY_HASHES*24*60*60)
         
     @classmethod
     def mark_read(cls, user_id, story_feed_id, story_hash, social_user_ids=None, 
@@ -1264,13 +1293,17 @@ class UserSubscriptionFolders(models.Model):
         
         return _arrange_folder(user_sub_folders)
     
-    def flatten_folders(self, feeds=None):
+    def flatten_folders(self, feeds=None, inactive_feeds=None):
         folders = json.decode(self.folders)
         flat_folders = {" ": []}
+        if feeds and not inactive_feeds:
+            inactive_feeds = []
         
         def _flatten_folders(items, parent_folder="", depth=0):
             for item in items:
-                if isinstance(item, int) and ((not feeds) or (feeds and item in feeds)):
+                if (isinstance(item, int) and 
+                    (not feeds or 
+                     (item in feeds or item in inactive_feeds))):
                     if not parent_folder:
                         parent_folder = ' '
                     if parent_folder in flat_folders:
@@ -1293,6 +1326,7 @@ class UserSubscriptionFolders(models.Model):
         return flat_folders
 
     def delete_feed(self, feed_id, in_folder, commit_delete=True):
+        feed_id = int(feed_id)
         def _find_feed_in_folders(old_folders, folder_name='', multiples_found=False, deleted=False):
             new_folders = []
             for k, folder in enumerate(old_folders):
@@ -1301,7 +1335,7 @@ class UserSubscriptionFolders(models.Model):
                         (folder_name != in_folder) or
                         (folder_name == in_folder and deleted))):
                         multiples_found = True
-                        logging.user(self.user, "~FB~SBDeleting feed, and a multiple has been found in '%s'" % (folder_name))
+                        logging.user(self.user, "~FB~SBDeleting feed, and a multiple has been found in '%s' / '%s' %s" % (folder_name, in_folder, '(deleted)' if deleted else ''))
                     if (folder == feed_id and 
                         (folder_name == in_folder or in_folder is None) and 
                         not deleted):
@@ -1438,6 +1472,7 @@ class UserSubscriptionFolders(models.Model):
         logging.user(self.user, "~FBMoving ~SB%s~SN feeds to folder: ~SB%s" % (
                      len(feeds_by_folder), to_folder))
         for feed_id, in_folder in feeds_by_folder:
+            feed_id = int(feed_id)
             self.move_feed_to_folder(feed_id, in_folder, to_folder)
         
         return self
@@ -1479,7 +1514,31 @@ class UserSubscriptionFolders(models.Model):
             return feeds
 
         return _flat(folders)
-    
+        
+    def feed_ids_under_folder_slug(self, slug):
+        folders = json.decode(self.folders)
+        
+        def _feeds(folder, found=False, folder_title=None):
+            feeds = []
+            local_found = False
+            for item in folder:
+                if isinstance(item, int) and item not in feeds and found:
+                    feeds.append(item)
+                elif isinstance(item, dict):
+                    for f_k, f_v in item.items():
+                        if slugify(f_k) == slug:
+                            found = True
+                            local_found = True
+                            folder_title = f_k
+                        found_feeds, folder_title = _feeds(f_v, found, folder_title)
+                        feeds.extend(found_feeds)
+                        if local_found:
+                            found = False
+                            local_found = False
+            return feeds, folder_title
+
+        return _feeds(folders)
+        
     @classmethod
     def add_all_missing_feeds(cls):
         usf = cls.objects.all().order_by('pk')

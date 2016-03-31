@@ -9,9 +9,7 @@ import android.database.Cursor;
 import android.os.IBinder;
 import android.os.PowerManager;
 import android.os.Process;
-import android.text.TextUtils;
 import android.util.Log;
-import android.widget.Toast;
 
 import com.newsblur.R;
 import com.newsblur.activity.NbActivity;
@@ -21,6 +19,7 @@ import com.newsblur.database.DatabaseConstants;
 import com.newsblur.domain.Feed;
 import com.newsblur.domain.Folder;
 import com.newsblur.domain.SocialFeed;
+import com.newsblur.domain.StarredCount;
 import com.newsblur.domain.Story;
 import com.newsblur.network.APIConstants;
 import com.newsblur.network.APIManager;
@@ -28,7 +27,6 @@ import com.newsblur.network.domain.FeedFolderResponse;
 import com.newsblur.network.domain.NewsBlurResponse;
 import com.newsblur.network.domain.StoriesResponse;
 import com.newsblur.network.domain.UnreadCountResponse;
-import com.newsblur.network.domain.UnreadStoryHashesResponse;
 import com.newsblur.util.AppConstants;
 import com.newsblur.util.FeedSet;
 import com.newsblur.util.FileCache;
@@ -68,12 +66,6 @@ import java.util.concurrent.TimeUnit;
  */
 public class NBSyncService extends Service {
 
-    /**
-     * Mode switch for which newly received stories are suitable for display so
-     * that they don't disrupt actively visible pager and list offsets.
-     */
-    public enum ActivationMode { ALL, OLDER, NEWER };
-
     private static final Object WAKELOCK_MUTEX = new Object();
     private static final Object PENDING_FEED_MUTEX = new Object();
 
@@ -86,8 +78,6 @@ public class NBSyncService extends Service {
     private volatile static boolean DoFeedsFolders = false;
     private volatile static boolean DoUnreads = false;
     private volatile static boolean HaltNow = false;
-    private volatile static ActivationMode ActMode = ActivationMode.ALL;
-    private volatile static long ModeCutoff = 0L;
 
     /** Informational flag only, as to whether we were offline last time we cycled. */
     public volatile static boolean OfflineNow = false;
@@ -116,6 +106,12 @@ public class NBSyncService extends Service {
     private static Map<FeedSet,Integer> FeedStoriesSeen;
     static { FeedStoriesSeen = new HashMap<FeedSet,Integer>(); }
 
+    /** Feed to reset to zero-state, so it is fetched fresh, presumably with new filters. */
+    private static FeedSet ResetFeed;
+
+    /** Flag to reset the reading session table. */
+    private static boolean ResetSession = false;
+
     /** Actions that may need to be double-checked locally due to overlapping API calls. */
     private static List<ReadingAction> FollowupActions;
     static { FollowupActions = new ArrayList<ReadingAction>(); }
@@ -137,6 +133,12 @@ public class NBSyncService extends Service {
 	APIManager apiManager;
     BlurDatabaseHelper dbHelper;
     private int lastStartIdCompleted = -1;
+
+    /** The time of the last hard API failure we encountered. Used to implement back-off so that the sync
+        service doesn't spin in the background chewing up battery when the API is unavailable. */
+    private static long lastAPIFailure = 0;
+
+    private static int lastActionCount = 0;
 
 	@Override
 	public void onCreate() {
@@ -215,7 +217,7 @@ public class NBSyncService extends Service {
 
             if (OfflineNow) {
                 OfflineNow = false;   
-                NbActivity.updateAllActivities(false);
+                NbActivity.updateAllActivities(NbActivity.UPDATE_STATUS);
             }
 
             // do this even if background syncs aren't enabled, because it absolutely must happen
@@ -229,7 +231,7 @@ public class NBSyncService extends Service {
             }
 
             // ping activities to indicate that housekeeping is done, and the DB is safe to use
-            NbActivity.updateAllActivitiesReady();
+            NbActivity.updateAllActivities(NbActivity.UPDATE_DB_READY);
 
             originalTextService.start(startId);
 
@@ -266,10 +268,10 @@ public class NBSyncService extends Service {
             boolean upgraded = PrefsUtils.checkForUpgrade(this);
             if (upgraded) {
                 HousekeepingRunning = true;
-                NbActivity.updateAllActivities(false);
+                NbActivity.updateAllActivities(NbActivity.UPDATE_STATUS | NbActivity.UPDATE_REBUILD);
                 // wipe the local DB
                 dbHelper.dropAndRecreateTables();
-                NbActivity.updateAllActivities(true);
+                NbActivity.updateAllActivities(NbActivity.UPDATE_METADATA);
                 // in case this is the first time we have run since moving the cache to the new location,
                 // blow away the old version entirely. This line can be removed some time well after
                 // v61+ is widely deployed
@@ -283,7 +285,7 @@ public class NBSyncService extends Service {
             
             if (upgraded || autoVac) {
                 HousekeepingRunning = true;
-                NbActivity.updateAllActivities(false);
+                NbActivity.updateAllActivities(NbActivity.UPDATE_STATUS);
                 Log.i(this.getClass().getName(), "rebuilding DB . . .");
                 dbHelper.vacuum();
                 Log.i(this.getClass().getName(), ". . . . done rebuilding DB");
@@ -292,7 +294,7 @@ public class NBSyncService extends Service {
         } finally {
             if (HousekeepingRunning) {
                 HousekeepingRunning = false;
-                NbActivity.updateAllActivities(true);
+                NbActivity.updateAllActivities(NbActivity.UPDATE_METADATA);
             }
         }
     }
@@ -302,16 +304,18 @@ public class NBSyncService extends Service {
      */
     private void syncActions() {
         if (stopSync()) return;
+        if (backoffBackgroundCalls()) return;
 
         Cursor c = null;
         try {
             c = dbHelper.getActions(false);
-            if (c.getCount() < 1) return;
+            lastActionCount = c.getCount();
+            if (lastActionCount < 1) return;
 
             ActionsRunning = true;
-            NbActivity.updateAllActivities(false);
 
             actionsloop : while (c.moveToNext()) {
+                NbActivity.updateAllActivities(NbActivity.UPDATE_STATUS);
                 String id = c.getString(c.getColumnIndexOrThrow(DatabaseConstants.ACTION_ID));
                 ReadingAction ra;
                 try {
@@ -322,29 +326,33 @@ public class NBSyncService extends Service {
                     continue actionsloop;
                 }
                     
+                if (AppConstants.VERBOSE_LOG) Log.d(this.getClass().getName(), "doing action: " + ra.toContentValues().toString());
                 NewsBlurResponse response = ra.doRemote(apiManager);
 
                 if (response == null) {
-                    Log.e(this.getClass().getName(), "Discarding reading action with internal API error.");
+                    Log.e(this.getClass().getName(), "Discarding reading action with client-side error.");
                     dbHelper.clearAction(id);
                 } else if (response.isProtocolError) {
                     // the network failed or we got a non-200, so be sure we retry
+                    Log.i(this.getClass().getName(), "Holding reading action with server-side or network error.");
+                    noteHardAPIFailure();
                     continue actionsloop;
                 } else if (response.isError()) {
                     Log.e(this.getClass().getName(), "Discarding reading action with user error.");
                     dbHelper.clearAction(id);
+                    String message = response.getErrorMessage(null);
+                    if (message != null) NbActivity.toastError(message);
                 } else {
                     // success!
                     dbHelper.clearAction(id);
                     FollowupActions.add(ra);
                 }
+                lastActionCount--;
             }
         } finally {
             closeQuietly(c);
-            if (ActionsRunning) {
-                ActionsRunning = false;
-                NbActivity.updateAllActivities(false);
-            }
+            ActionsRunning = false;
+            NbActivity.updateAllActivities(NbActivity.UPDATE_STATUS);
         }
     }
 
@@ -356,13 +364,23 @@ public class NBSyncService extends Service {
         if (HaltNow) return;
         if (FollowupActions.size() < 1) return;
 
+        if (AppConstants.VERBOSE_LOG) Log.d(this.getClass().getName(), "double-checking " + FollowupActions.size() + " actions");
+        int impactFlags = 0;
         for (ReadingAction ra : FollowupActions) {
-            ra.doLocal(dbHelper);
+            int impact = ra.doLocal(dbHelper);
+            impactFlags |= impact;
         }
-        if (PendingFeed == null) {
-            FollowupActions.clear();
-        }
-        NbActivity.updateAllActivities(false);
+        NbActivity.updateAllActivities(impactFlags);
+
+        // if there is a feed fetch loop running, don't clear, there will likely be races for
+        // stories that were just tapped as they were being re-fetched
+        synchronized (PENDING_FEED_MUTEX) {if (PendingFeed != null) return;}
+
+        // if there is a what-is-unread sync in progress, hold off on confirming actions,
+        // as this subservice can vend stale unread data
+        if (UnreadsService.isDoMetadata()) return;
+
+        FollowupActions.clear();
     }
 
     /**
@@ -378,26 +396,22 @@ public class NBSyncService extends Service {
         }
 
         if (stopSync()) return;
-        if (ActMode != ActivationMode.ALL) return;
+        if (backoffBackgroundCalls()) return;
+        if (dbHelper.getActions(false).getCount() > 0) return;
 
         FFSyncRunning = true;
-        NbActivity.updateAllActivities(false);
+        NbActivity.updateAllActivities(NbActivity.UPDATE_STATUS);
 
-        // there is a rare issue with feeds that have no folder.  capture them for workarounds.
-        Set<String> debugFeedIds = new HashSet<String>();
+        // there is an issue with feeds that have no folder or folders that list feeds that do not exist.  capture them for workarounds.
+        Set<String> debugFeedIdsFromFolders = new HashSet<String>();
+        Set<String> debugFeedIdsFromFeeds = new HashSet<String>();
         orphanFeedIds = new HashSet<String>();
 
         try {
-            // a metadata sync invalidates pagination and feed status
-            ExhaustedFeeds.clear();
-            FeedPagesSeen.clear();
-            FeedStoriesSeen.clear();
-            UnreadsService.clear();
-            RecountCandidates.clear();
-
             FeedFolderResponse feedResponse = apiManager.getFolderFeedMapping(true);
 
             if (feedResponse == null) {
+                noteHardAPIFailure();
                 return;
             }
 
@@ -408,6 +422,16 @@ public class NBSyncService extends Service {
                 return;
             }
 
+            if (stopSync()) return;
+            if (dbHelper.getActions(false).getCount() > 0) return;
+
+            // a metadata sync invalidates pagination and feed status
+            ExhaustedFeeds.clear();
+            FeedPagesSeen.clear();
+            FeedStoriesSeen.clear();
+            UnreadsService.clear();
+            RecountCandidates.clear();
+
             lastFFConnMillis = feedResponse.connTime;
             lastFFReadMillis = feedResponse.readTime;
             lastFFParseMillis = feedResponse.parseTime;
@@ -416,24 +440,20 @@ public class NBSyncService extends Service {
             isPremium = feedResponse.isPremium;
             isStaff = feedResponse.isStaff;
 
-            // clean out the feed / folder tables
-            dbHelper.cleanupFeedsFolders();
-
-            // data for the folder and folder-feed-mapping tables
-            List<ContentValues> folderValues = new ArrayList<ContentValues>();
+            // note all feeds that belong to some folder so we can find orphans
             for (Folder folder : feedResponse.folders) {
-                folderValues.add(folder.getValues());
-                // note all feeds that belong to some folder
-                debugFeedIds.addAll(folder.feedIds);
+                debugFeedIdsFromFolders.addAll(folder.feedIds);
             }
 
             // data for the feeds table
             List<ContentValues> feedValues = new ArrayList<ContentValues>();
             feedaddloop: for (Feed feed : feedResponse.feeds) {
+                // note all feeds for which the API returned data
+                debugFeedIdsFromFeeds.add(feed.feedId);
                 // sanity-check that the returned feeds actually exist in a folder or at the root
                 // if they do not, they should neither display nor count towards unread numbers
-                if (! debugFeedIds.contains(feed.feedId)) {
-                    Log.w(this.getClass().getName(), "Found and ignoring un-foldered feed: " + feed.feedId );
+                if (! debugFeedIdsFromFolders.contains(feed.feedId)) {
+                    Log.w(this.getClass().getName(), "Found and ignoring orphan feed (in feeds but not folders): " + feed.feedId );
                     orphanFeedIds.add(feed.feedId);
                     continue feedaddloop;
                 }
@@ -443,17 +463,48 @@ public class NBSyncService extends Service {
                 }
                 feedValues.add(feed.getValues());
             }
+            // also add the implied zero-id feed
+            feedValues.add(Feed.getZeroFeed().getValues());
+
+            // prune out missiong feed IDs from folders
+            for (String id : debugFeedIdsFromFolders) {
+                if (! debugFeedIdsFromFeeds.contains(id)) {
+                    Log.w(this.getClass().getName(), "Found and ignoring orphan feed (in folders but not feeds): " + id );
+                    orphanFeedIds.add(id);
+                }
+            }
             
+            // data for the folder table
+            List<ContentValues> folderValues = new ArrayList<ContentValues>();
+            Set<String> foldersSeen = new HashSet<String>(feedResponse.folders.size());
+            folderloop: for (Folder folder : feedResponse.folders) {
+                // don't form graph loops in the folder tree
+                if (foldersSeen.contains(folder.name)) continue folderloop;
+                foldersSeen.add(folder.name);
+                // prune out orphans before pushing to the DB
+                folder.removeOrphanFeedIds(orphanFeedIds);
+                folderValues.add(folder.getValues());
+            }
+
             // data for the the social feeds table
             List<ContentValues> socialFeedValues = new ArrayList<ContentValues>();
             for (SocialFeed feed : feedResponse.socialFeeds) {
                 socialFeedValues.add(feed.getValues());
             }
             
-            dbHelper.insertFeedsFolders(folderValues, feedValues, socialFeedValues);
-
             // populate the starred stories count table
-            dbHelper.updateStarredStoriesCount(feedResponse.starredCount);
+            List<ContentValues> starredCountValues = new ArrayList<ContentValues>();
+            for (StarredCount sc : feedResponse.starredCounts) {
+                starredCountValues.add(sc.getValues());
+            }
+            // the API vends the starred total as a different element, roll it into
+            // the starred counts table using a special tag
+            StarredCount totalStarred = new StarredCount();
+            totalStarred.count = feedResponse.starredCount;
+            totalStarred.tag = StarredCount.TOTAL_STARRED;
+            starredCountValues.add(totalStarred.getValues());
+
+            dbHelper.setFeedsFolders(folderValues, feedValues, socialFeedValues, starredCountValues);
 
             lastFFWriteMillis = System.currentTimeMillis() - startTime;
             lastFeedCount = feedValues.size();
@@ -464,7 +515,7 @@ public class NBSyncService extends Service {
 
         } finally {
             FFSyncRunning = false;
-            NbActivity.updateAllActivities(true);
+            NbActivity.updateAllActivities(NbActivity.UPDATE_METADATA | NbActivity.UPDATE_STATUS);
         }
 
     }
@@ -479,7 +530,7 @@ public class NBSyncService extends Service {
             if (RecountCandidates.size() < 1) return;
 
             RecountsRunning = true;
-            NbActivity.updateAllActivities(false);
+            NbActivity.updateAllActivities(NbActivity.UPDATE_STATUS);
 
             // of all candidate feeds that were touched, now check to see if
             // any of them have mismatched local and remote counts we need to reconcile
@@ -531,7 +582,7 @@ public class NBSyncService extends Service {
         } finally {
             if (RecountsRunning) {
                 RecountsRunning = false;
-                NbActivity.updateAllActivities(true);
+                NbActivity.updateAllActivities(NbActivity.UPDATE_METADATA | NbActivity.UPDATE_STATUS);
             }
             FlushRecounts = false;
         }
@@ -541,6 +592,14 @@ public class NBSyncService extends Service {
      * Fetch stories needed because the user is actively viewing a feed or folder.
      */
     private void syncPendingFeedStories() {
+        // before anything else, see if we need to quickly reset fetch state for a feed
+        if (ResetFeed != null) {
+            ExhaustedFeeds.remove(ResetFeed);
+            FeedStoriesSeen.remove(ResetFeed);
+            FeedPagesSeen.remove(ResetFeed);
+            ResetFeed = null;
+        }
+
         FeedSet fs = PendingFeed;
         boolean finished = false;
         if (fs == null) {
@@ -563,37 +622,51 @@ public class NBSyncService extends Service {
 
             StoryOrder order = PrefsUtils.getStoryOrder(this, fs);
             ReadFilter filter = PrefsUtils.getReadFilter(this, fs);
+
+            synchronized (PENDING_FEED_MUTEX) {
+                if (ResetSession) {
+                    // the next fetch will be the start of a new reading session; clear it so it
+                    // will be re-primed
+                    dbHelper.clearStorySession();
+                    // don't just rely on the auto-prepare code when fetching stories, it might be called
+                    // after we insert our first page and not trigger
+                    dbHelper.prepareReadingSession(fs);
+                    ResetSession = false;
+                }
+            }
             
             while (totalStoriesSeen < PendingFeedTarget) {
                 if (stopSync()) return;
+                // this is a good heuristic for double-checking if we have left the story list
                 if (FlushRecounts) return;
+                // don't let the page loop block actions
+                if (dbHelper.getActions(false).getCount() > 0) return;
+
+                // bail if the active view has changed
                 if (!fs.equals(PendingFeed)) {
-                    // the active view has changed
-                    if (fs == null) finished = true;
                     return; 
                 }
 
                 StorySyncRunning = true;
-                NbActivity.updateAllActivities(false);
+                NbActivity.updateAllActivities(NbActivity.UPDATE_STATUS);
 
                 pageNumber++;
                 StoriesResponse apiResponse = apiManager.getStories(fs, pageNumber, order, filter);
             
                 if (! isStoryResponseGood(apiResponse)) return;
 
+                if (!fs.equals(PendingFeed)) {
+                    return; 
+                }
+
+                insertStories(apiResponse, fs);
+                // re-do any very recent actions that were incorrectly overwritten by this page
+                finishActions();
+                NbActivity.updateAllActivities(NbActivity.UPDATE_STORY);
+            
                 FeedPagesSeen.put(fs, pageNumber);
                 totalStoriesSeen += apiResponse.stories.length;
                 FeedStoriesSeen.put(fs, totalStoriesSeen);
-
-                // lock in the activation cutoff based upon the timestamp of the first
-                // story received for a given pagination session. it will be the newest
-                // or oldest story for the feedset, as dictated by order.
-                if ((pageNumber == 1) && (apiResponse.stories.length > 0)) {
-                    ModeCutoff = apiResponse.stories[0].timestamp;
-                }
-                insertStories(apiResponse, fs);
-                NbActivity.updateAllActivities(true);
-            
                 if (apiResponse.stories.length == 0) {
                     ExhaustedFeeds.add(fs);
                     finished = true;
@@ -605,7 +678,7 @@ public class NBSyncService extends Service {
         } finally {
             if (StorySyncRunning) {
                 StorySyncRunning = false;
-                NbActivity.updateAllActivities(false);
+                NbActivity.updateAllActivities(NbActivity.UPDATE_STATUS);
             }
             synchronized (PENDING_FEED_MUTEX) {
                 if (finished && fs.equals(PendingFeed)) PendingFeed = null;
@@ -652,11 +725,27 @@ public class NBSyncService extends Service {
             }
         }
 
-        dbHelper.insertStories(apiResponse, ActMode, ModeCutoff);
+        if (fs.getSingleSavedTag() != null) {
+            // Workaround: the API doesn't vend an embedded 'feeds' block with metadata for feeds
+            // to which the user is not subscribed but that contain saved stories. In order to
+            // prevent these stories being invisible due to failed metadata joins, insert fake
+            // feed data like with the zero-ID generic feed to match the web UI behaviour
+            dbHelper.fixMissingStoryFeeds(apiResponse.stories);
+        }
+
+        if (fs.getSearchQuery() != null) {
+            // If this set of stories was found in response to the active search query, note
+            // them as such in the DB so the UI can filter for them
+            for (Story story : apiResponse.stories) {
+                story.searchHit = fs.getSearchQuery();
+            }
+        }
+
+        dbHelper.insertStories(apiResponse, true);
     }
 
     void insertStories(StoriesResponse apiResponse) {
-        dbHelper.insertStories(apiResponse, ActMode, ModeCutoff);
+        dbHelper.insertStories(apiResponse, false);
     }
 
     void incrementRunningChild() {
@@ -678,6 +767,7 @@ public class NBSyncService extends Service {
                     stopSelf(startId);
                 }
                 lastStartIdCompleted = startId;
+                if (AppConstants.VERBOSE_LOG) Log.d(this.getClass().getName(), "wakelock depleted");
             }
         }
     }
@@ -697,6 +787,17 @@ public class NBSyncService extends Service {
 
     boolean stopSync() {
         return stopSync(this);
+    }
+
+    private void noteHardAPIFailure() {
+        lastAPIFailure = System.currentTimeMillis();
+    }
+
+    private boolean backoffBackgroundCalls() {
+        if (NbActivity.getActiveActivityCount() > 0) return false;
+        if (System.currentTimeMillis() > (lastAPIFailure + AppConstants.API_BACKGROUND_BACKOFF_MILLIS)) return false;
+        Log.i(this.getClass().getName(), "abandoning background sync due to recent API failures.");
+        return true;
     }
 
     public void onTrimMemory (int level) {
@@ -722,6 +823,10 @@ public class NBSyncService extends Service {
         return (HousekeepingRunning || RecountsRunning || FFSyncRunning);
     }
 
+    public static boolean isHousekeepingRunning() {
+        return HousekeepingRunning;
+    }
+
     /**
      * Is there a sync for a given FeedSet running?
      */
@@ -740,13 +845,15 @@ public class NBSyncService extends Service {
         if (OfflineNow) return context.getResources().getString(R.string.sync_status_offline);
         if (brief && !AppConstants.VERBOSE_LOG) return null;
         if (HousekeepingRunning) return context.getResources().getString(R.string.sync_status_housekeeping);
-        if (ActionsRunning||RecountsRunning) return context.getResources().getString(R.string.sync_status_actions);
+        if (ActionsRunning) return String.format(context.getResources().getString(R.string.sync_status_actions), lastActionCount);
+        if (RecountsRunning) return context.getResources().getString(R.string.sync_status_recounts);
         if (FFSyncRunning) return context.getResources().getString(R.string.sync_status_ffsync);
-        if (CleanupService.running()) return context.getResources().getString(R.string.sync_status_cleanup);
-        if (StorySyncRunning) return context.getResources().getString(R.string.sync_status_stories);
         if (UnreadsService.running()) return String.format(context.getResources().getString(R.string.sync_status_unreads), UnreadsService.getPendingCount());
         if (OriginalTextService.running()) return String.format(context.getResources().getString(R.string.sync_status_text), OriginalTextService.getPendingCount());
         if (ImagePrefetchService.running()) return String.format(context.getResources().getString(R.string.sync_status_images), ImagePrefetchService.getPendingCount());
+        if (CleanupService.running()) return context.getResources().getString(R.string.sync_status_cleanup);
+        if (!AppConstants.VERBOSE_LOG) return null;
+        if (StorySyncRunning) return context.getResources().getString(R.string.sync_status_stories);
         return null;
     }
 
@@ -760,18 +867,6 @@ public class NBSyncService extends Service {
 
     public static void flushRecounts() {
         FlushRecounts = true;
-    }
-
-    /**
-     * Tell the service which stories can be activated if received. See ActivationMode.
-     */
-    public static void setActivationMode(ActivationMode actMode) {
-        ActMode = actMode;
-    }
-
-    public static void setActivationMode(ActivationMode actMode, long modeCutoff) {
-        ActMode = actMode;
-        ModeCutoff = modeCutoff;
     }
 
     /**
@@ -801,7 +896,7 @@ public class NBSyncService extends Service {
                 alreadyPending = 0;
             }
 
-            if (AppConstants.VERBOSE_LOG) Log.d(NBSyncService.class.getName(), "have:" + alreadySeen + "  want:" + desiredStoryCount + " pending:" + alreadyPending);
+            if (AppConstants.VERBOSE_LOG) Log.d(NBSyncService.class.getName(), "callerhas: " + callerSeen + "  have:" + alreadySeen + "  want:" + desiredStoryCount + "  pending:" + alreadyPending);
             if (desiredStoryCount <= alreadySeen) {
                 return false;
             }
@@ -815,16 +910,23 @@ public class NBSyncService extends Service {
         return true;
     }
 
-    public static void clearPendingStoryRequest() {
+    /**
+     * Gracefully stop the loading of the current FeedSet, and set a flag so that the reading
+     * session gets cleared before the next one is populated.
+     */
+    public static void resetReadingSession() {
         synchronized (PENDING_FEED_MUTEX) {
             PendingFeed = null;
+            ResetSession = true;
         }
     }
 
-    public static void resetFeeds() {
-        ExhaustedFeeds.clear();
-        FeedPagesSeen.clear();
-        FeedStoriesSeen.clear();
+    /**
+     * Reset the API pagniation state for the given feedset, presumably because the order or filter changed.
+     */
+    public static void resetFetchState(FeedSet fs) {
+        Log.d(NBSyncService.class.getName(), "requesting feed fetch state reset");
+        ResetFeed = fs;
     }
 
     public static void getOriginalText(String hash) {
@@ -832,13 +934,17 @@ public class NBSyncService extends Service {
     }
 
     public static void addRecountCandidates(FeedSet fs) {
-        if (fs != null) {
-            RecountCandidates.add(fs);
-        }
+        if (fs == null) return;
+        // if this is a special feedset (read, saved, global shared, etc) that doesn't represent a
+        // countable set of stories, don't bother recounting it
+        if (fs.getFlatFeedIds().size() < 1) return;
+        RecountCandidates.add(fs);
     }
 
-    public static void addRecountCandidates(Set<FeedSet> fs) {
-        RecountCandidates.addAll(fs);
+    public static void addRecountCandidates(Set<FeedSet> sets) {
+        for (FeedSet fs : sets) {
+            addRecountCandidates(fs);
+        }
     }
 
     public static void softInterrupt() {
@@ -850,10 +956,12 @@ public class NBSyncService extends Service {
      * Resets any internal temp vars or queues. Called when switching accounts.
      */
     public static void clearState() {
-        clearPendingStoryRequest();
+        resetReadingSession();
         FollowupActions.clear();
         RecountCandidates.clear();
-        resetFeeds();
+        ExhaustedFeeds.clear();
+        FeedPagesSeen.clear();
+        FeedStoriesSeen.clear();
         OriginalTextService.clear();
         UnreadsService.clear();
         ImagePrefetchService.clear();
@@ -905,6 +1013,13 @@ public class NBSyncService extends Service {
         s.append(" read:").append(lastFFReadMillis);
         s.append(" parse:").append(lastFFParseMillis);
         s.append(" store:").append(lastFFWriteMillis);
+        return s.toString();
+    }
+
+    public static String getPendingInfo() {
+        StringBuilder s = new StringBuilder();
+        s.append(" pre:").append(lastActionCount);
+        s.append(" post:").append(FollowupActions.size());
         return s.toString();
     }
 

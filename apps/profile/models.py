@@ -3,6 +3,7 @@ import datetime
 import dateutil
 import stripe
 import hashlib
+import re
 import redis
 import uuid
 import mongoengine as mongo
@@ -98,6 +99,7 @@ class Profile(models.Model):
             print " ---> You must pass confirm=True to delete this user."
             return
         
+        logging.user(self.user, "Deleting user: %s / %s" % (self.user.email, self.user.profile.last_seen_ip))
         try:
             self.cancel_premium()
         except:
@@ -160,7 +162,7 @@ class Profile(models.Model):
     
     def activate_premium(self, never_expire=False):
         from apps.profile.tasks import EmailNewPremium
-
+        
         EmailNewPremium.delay(user_id=self.user.pk)
         
         self.is_premium = True
@@ -355,9 +357,10 @@ class Profile(models.Model):
         stripe_cancel = self.cancel_premium_stripe()
         return paypal_cancel or stripe_cancel
     
-    def cancel_premium_paypal(self):
+    def cancel_premium_paypal(self, second_most_recent_only=False):
         transactions = PayPalIPN.objects.filter(custom=self.user.username,
-                                                txn_type='subscr_signup')
+                                                txn_type='subscr_signup').order_by('-subscr_date')
+        
         if not transactions:
             return
         
@@ -369,14 +372,24 @@ class Profile(models.Model):
             'API_CA_CERTS': False,
         }
         paypal = PayPalInterface(**paypal_opts)
-        transaction = transactions[0]
+        if second_most_recent_only:
+            # Check if user has an active subscription. If so, cancel it because a new one came in.
+            if len(transactions) > 1:
+                transaction = transactions[1]
+            else:
+                return False
+        else:
+            transaction = transactions[0]
         profileid = transaction.subscr_id
         try:
             paypal.manage_recurring_payments_profile_status(profileid=profileid, action='Cancel')
         except PayPalAPIResponseError:
-            logging.user(self.user, "~FRUser ~SBalready~SN canceled Paypal subscription")
+            logging.user(self.user, "~FRUser ~SBalready~SN canceled Paypal subscription: %s" % profileid)
         else:
-            logging.user(self.user, "~FRCanceling Paypal subscription")
+            if second_most_recent_only:
+                logging.user(self.user, "~FRCanceling ~BR~FWsecond-oldest~SB~FR Paypal subscription: %s" % profileid)
+            else:
+                logging.user(self.user, "~FRCanceling Paypal subscription: %s" % profileid)
         
         return True
         
@@ -399,15 +412,19 @@ class Profile(models.Model):
     def clear_dead_spammers(self, days=30, confirm=False):
         users = User.objects.filter(date_joined__gte=datetime.datetime.now()-datetime.timedelta(days=days)).order_by('-date_joined')
         usernames = set()
-
+        numerics = re.compile(r'[0-9]+')
         for user in users:
-          opens = UserSubscription.objects.filter(user=user).aggregate(sum=Sum('feed_opens'))['sum']
-          reads = RUserStory.read_story_count(user.pk)
-          if opens is None and not reads:
-             usernames.add(user.username)
-             print user.username, user.email, opens, reads
+            opens = UserSubscription.objects.filter(user=user).aggregate(sum=Sum('feed_opens'))['sum']
+            reads = RUserStory.read_story_count(user.pk)
+            has_numbers = numerics.search(user.username)
+            if opens is None and not reads and has_numbers:
+                usernames.add(user.username)
+                print " ---> Numerics: %-20s %-30s %-6s %-6s" % (user.username, user.email, opens, reads)
+            elif not user.profile.last_seen_ip:
+                usernames.add(user.username)
+                print " ---> No IP: %-20s %-30s %-6s %-6s" % (user.username, user.email, opens, reads)
         
-        if not confirm: return
+        if not confirm: return usernames
         
         for username in usernames:
             u = User.objects.get(username=username)
@@ -423,7 +440,8 @@ class Profile(models.Model):
         entire_feed_counted = False
         
         if verbose:
-            logging.debug(" ---> ~SN~FBCounting subscribers for feed:~SB~FM%s~SN~FB user:~SB~FM%s" % (feed_id, user_id))
+            feed = Feed.get_by_id(feed_id)
+            logging.debug("   ---> [%-30s] ~SN~FBCounting subscribers for feed:~SB~FM%s~SN~FB user:~SB~FM%s" % (feed.title[:30], feed_id, user_id))
         
         if feed_id:
             feed_ids = [feed_id]
@@ -876,6 +894,8 @@ def paypal_signup(sender, **kwargs):
     except:
         pass
     user.profile.activate_premium()
+    user.profile.cancel_premium_stripe()
+    user.profile.cancel_premium_paypal(second_most_recent_only=True)
 subscription_signup.connect(paypal_signup)
 
 def paypal_payment_history_sync(sender, **kwargs):
@@ -924,6 +944,7 @@ def stripe_signup(sender, full_json, **kwargs):
         profile = Profile.objects.get(stripe_id=stripe_id)
         logging.user(profile.user, "~BC~SB~FBStripe subscription signup")
         profile.activate_premium()
+        profile.cancel_premium_paypal()
     except Profile.DoesNotExist:
         return {"code": -1, "message": "User doesn't exist."}
 zebra_webhook_customer_subscription_created.connect(stripe_signup)
@@ -1144,7 +1165,7 @@ class RNewUserQueue:
             logging.debug("~FRCan't activate free account, can't find user ~SB%s~SN. ~FB%s still in queue." % (user_id, count-1))
             return
             
-        logging.user(user, "~FBActivating free account (%s). %s still in queue." % (user.email, (count-1)))
+        logging.user(user, "~FBActivating free account (%s / %s). %s still in queue." % (user.email, user.profile.last_seen_ip, (count-1)))
 
         user.profile.activate_free()
     

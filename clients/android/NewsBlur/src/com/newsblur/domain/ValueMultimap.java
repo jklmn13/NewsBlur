@@ -1,6 +1,7 @@
 package com.newsblur.domain;
 
 import java.io.Serializable;
+import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -8,10 +9,8 @@ import java.util.Map;
 
 import android.text.TextUtils;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.squareup.okhttp.FormEncodingBuilder;
-import com.squareup.okhttp.RequestBody;
+import okhttp3.FormBody;
+import okhttp3.RequestBody;
 
 /**
  * A String-to-String multimap that serializes to JSON or HTTP request params.
@@ -20,7 +19,6 @@ import com.squareup.okhttp.RequestBody;
 public class ValueMultimap implements Serializable {
 	
 	private Map<String, List<String>> multimap;
-	private String TAG = "ValueMultimap";
 	
 	public ValueMultimap() {
 		multimap = new HashMap<String, List<String>>();
@@ -42,32 +40,15 @@ public class ValueMultimap implements Serializable {
 				final StringBuilder builder = new StringBuilder();
 				builder.append(key);
 				builder.append("=");
-				builder.append(value);
+                builder.append(URLEncoder.encode(value));
 				parameters.add(builder.toString());
 			}
 		}
 		return TextUtils.join("&", parameters);
 	}
 	
-	public String getJsonString() {
-		ArrayList<String> parameters = new ArrayList<String>();
-		Gson gson = new GsonBuilder().disableHtmlEscaping().create();
-		for (String key : multimap.keySet()) {
-			StringBuilder builder = new StringBuilder();
-			builder.append("\"" + key + "\"");
-			builder.append(": ");
-			builder.append(gson.toJson(multimap.get(key)));
-			parameters.add(builder.toString());
-		}
-		final StringBuilder builder = new StringBuilder();
-		builder.append("{");
-		builder.append(TextUtils.join(",", parameters));
-		builder.append("}");
-		return builder.toString();
-	}
-
 	public RequestBody asFormEncodedRequestBody() {
-		FormEncodingBuilder formEncodingBuilder = new FormEncodingBuilder();
+		FormBody.Builder formEncodingBuilder = new FormBody.Builder();
 		for (String key : multimap.keySet()) {
 			for (String value : multimap.get(key)) {
 				formEncodingBuilder.add(key, value);

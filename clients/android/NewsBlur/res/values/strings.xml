@@ -2,16 +2,11 @@
 
     <string name="newsblur">NewsBlur</string>
     
-    <string name="error_unset_message">An unknown error occurred</string>
-    <string name="error_http_connection">There was a problem connecting to NewsBlur</string>
-    <string name="error_read_connection">There was a problem communicating with NewsBlur</string>
-    <string name="error_offline">There was a problem connecting to the network</string>
-
     <string name="login_username_hint">username</string>
     <string name="login_password_hint">password</string>
     <string name="login_registration_email_hint">email address</string>
     <string name="login_button_login">Log In</string>
-    <string name="login_message_error">There was problem connecting to NewsBlur. Check your internet connection.</string>
+    <string name="login_message_error">There was problem logging in to NewsBlur.</string>
     <string name="login_logging_in">Logging in…</string>
     <string name="login_logged_in">Logged in!</string>
     <string name="login_retrieving_feeds">Retrieving feeds…</string>
@@ -35,9 +30,8 @@
 	<string name="description_comment_user">Comment user image</string>
 	<string name="description_empty_list_image">Empty list placeholder</string>
     <string name="description_menu">Menu</string>
-	
-	<string name="reading_shared_count">%s shares</string>
-	<string name="reading_comment_count">%s comments</string>
+    
+    <string name="title_choose_folders">Choose Folders for Feed %s</string>
 	
 	<string name="all_stories_row_title">ALL STORIES</string>
 	<string name="all_shared_stories">ALL SHARED STORIES</string>
@@ -46,19 +40,21 @@
 	<string name="saved_stories_row_title">SAVED STORIES</string>
 	<string name="read_stories_title">Read Stories</string>
 	<string name="saved_stories_title">Saved Stories</string>
+    <string name="top_level">TOP LEVEL</string>
 	
 	<string name="error_saving_classifier">There was an error. Check your internet connection.</string>
 	
-	<string name="share">\"%1$s\" - %2$s</string>
+	<string name="send_brief">%1$s %2$s</string>
+	<string name="send_full">%1$s \n\n\"%2$s\" \n\n%3$s \n\n--\nShared with NewsBlur.com</string>
 	<string name="share_comment_hint">Comment (Optional)</string>
 	<string name="share_newsblur">Share \"%s\" to your Blurblog?</string>
-    <string name="share_this">SHARE THIS STORY</string>
-    <string name="already_shared">SHARED</string>
+    <string name="share_this">Share</string>
+    <string name="already_shared">Shared</string>
     <string name="share_this_story">Share this story</string>
     <string name="update_shared">Update comment</string>
 
-	<string name="save_this">SAVE THIS STORY</string>
-	<string name="unsave_this">UNSAVE THIS STORY</string>
+	<string name="save_this">Save</string>
+	<string name="unsave_this">Remove from saved</string>
 
     <string name="overlay_next">NEXT</string>
     <string name="overlay_done">DONE</string>
@@ -69,18 +65,17 @@
 
 	<string name="reply_to">Reply to \"%s\"</string>
 	
-	<string name="alert_dialog_ok">Okay</string>
-	<string name="alert_dialog_cancel">Cancel</string>
-	<string name="alert_dialog_done">Done</string>
-	<string name="alert_dialog_openimage">Open image</string>
+	<string name="alert_dialog_ok">OKAY</string>
+	<string name="alert_dialog_cancel">CANCEL</string>
+	<string name="alert_dialog_done">DONE</string>
+	<string name="alert_dialog_openimage">OPEN IMAGE</string>
+    <string name="dialog_folders_save">SAVE FOLDERS</string>
 	
     <string name="profile">Profile</string>
     <string name="profile_location_icon">Location icon</string>
     <string name="profile_following">FOLLOWING</string>
     <string name="profile_followers">FOLLOWERS</string>
     <string name="profile_shared">SHARED STORIES</string>
-    <string name="profile_no_bio">No bio included</string>
-    <string name="profile_no_location">Location not set</string>
     <string name="profile_ago">AGO</string>
     <string name="profile_recent_actvity">Activities</string>
     <string name="profile_recent_interactions">Interactions</string>
@@ -111,9 +106,11 @@
     <string name="menu_refresh">Refresh</string>
     <string name="menu_original">View original</string>
     <string name="menu_send_story">Send to…</string>
+    <string name="menu_send_story_full">Send full story to…</string>
     <string name="menu_mark_feed_as_read">Mark feed as read</string>
     <string name="menu_delete_feed">Delete feed</string>
     <string name="menu_unfollow">Unfollow user</string>
+    <string name="menu_choose_folders">Choose folders</string>
     <string name="menu_mark_folder_as_read">Mark folder as read</string>
     <string name="menu_sharenewsblur">Share this story</string>
     <string name="menu_textsize">Adjust text size</string>
@@ -126,17 +123,14 @@
     <string name="menu_mark_story_as_read">Mark as read</string>
     <string name="menu_mark_unread">Mark as unread</string>
     <string name="menu_fullscreen">Full screen</string>
+    <string name="menu_search_stories">Search…</string>
     
-    <string name="toast_marked_stories_as_read">Stories marked as read</string>
-
     <string name="toast_story_unread">Story marked as unread</string>
 
-    <string name="toast_feed_deleted">Feed deleted</string>
-    <string name="toast_unfollowed">Unfollowed</string>
-    
     <string name="logout_warning">Are you sure you want to log out?</string>
     
     <string name="feed_search_hint">Search for new feeds</string>
+    <string name="story_search_hint">Search for stories</string>
     <string name="empty_search_notice">Type a search term to begin</string>
     <string name="menu_add_feed">Add new feed</string>
     <string name="menu_search">Search</string>
@@ -154,6 +148,7 @@
     <string name="empty_list_view_no_focus_stories">You have no unread stories in Focus mode.\n\nSwitch to All or Unread.</string>
     
     <string name="login_registration_register">Register</string>
+    <string name="register_message_error">There was problem registering for NewsBlur.</string>
     <string name="get_started">Let\'s get started</string>
     <string name="add_friends">Add your friends</string>
     <string name="connect_with_your_friends">Connect with your friends to easily follow the stories that matter to them</string>
@@ -226,9 +221,13 @@
     <string name="default_read_filter_value">ALL</string>
     
     <string-array name="mark_all_read_options">
-        <item>Mark entire folder read</item>
+        <item>Mark all read</item>
         <item>Cancel</item>
     </string-array>
+
+    <string name="settings_auto_open_first_unread">Auto-Open First Story</string>
+    <string name="settings_auto_open_first_unread_sum">Automatically open first unread story from story list</string>
+
     <string name="settings_social">Social</string>
     <string name="settings_show_public_comments">Show Public Comments</string>
     <string name="settings_reading">Reading</string>
@@ -252,7 +251,8 @@
     <string name="default_theme_value">light</string>
 
     <string name="sync_status_housekeeping">Tidying up...</string>
-    <string name="sync_status_actions">Catching up reading actions...</string>
+    <string name="sync_status_actions">Catching up %d reading actions...</string>
+    <string name="sync_status_recounts">Catching up reading actions...</string>
     <string name="sync_status_ffsync">On its way...</string>
     <string name="sync_status_cleanup">Cleaning up...</string>
     <string name="sync_status_stories">Fetching fresh stories...</string>
@@ -276,4 +276,20 @@
         <item>DOWN_NEXT</item>
     </string-array>
     <string name="default_volume_key_navigation_value">OFF</string>
+
+    <string name="settings_confirm_mark_all_read">Confirm Mark All Read</string>
+    <string name="none">None</string>
+    <string name="feed_and_folder">Feeds and Folders</string>
+    <string name="folder_only">Folders Only</string>
+    <string-array name="confirm_mark_all_read_entries">
+        <item>@string/feed_and_folder</item>
+        <item>@string/folder_only</item>
+        <item>@string/none</item>
+    </string-array>
+    <string-array name="confirm_mark_all_read_values">
+        <item>FEED_AND_FOLDER</item>
+        <item>FOLDER_ONLY</item>
+        <item>NONE</item>
+    </string-array>
+    <string name="confirm_mark_all_read_value">FOLDER_ONLY</string>
 </resources>

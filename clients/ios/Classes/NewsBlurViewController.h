@@ -12,7 +12,6 @@
 #import "ASIHTTPRequest.h"
 #import "PullToRefreshView.h"
 #import "BaseViewController.h"
-#import "WYPopoverController.h"
 #import "NBNotifier.h"
 #import "IASKAppSettingsViewController.h"
 #import "MCSwipeTableViewCell.h"
@@ -23,12 +22,10 @@
 <UITableViewDelegate, UITableViewDataSource,
 UIAlertViewDelegate, PullToRefreshViewDelegate,
 ASIHTTPRequestDelegate, NSCacheDelegate,
-WYPopoverControllerDelegate,
 UIPopoverControllerDelegate,
 IASKSettingsDelegate,
 MCSwipeTableViewCellDelegate,
-UIGestureRecognizerDelegate,
-UIActionSheetDelegate> {
+UIGestureRecognizerDelegate> {
     NewsBlurAppDelegate *appDelegate;
     
     NSMutableDictionary * activeFeedLocations;
@@ -51,8 +48,6 @@ UIActionSheetDelegate> {
     UIBarButtonItem * settingsBarButton;
     UIBarButtonItem * activitiesButton;
     UISegmentedControl * intelligenceControl;
-    WYPopoverController *popoverController;
-	Class popoverClass;
     NBNotifier *notifier;
 }
 
@@ -81,12 +76,12 @@ UIActionSheetDelegate> {
 @property (nonatomic) NSDate *lastUpdate;
 @property (nonatomic) NSCache *imageCache;
 @property (nonatomic) IBOutlet UISegmentedControl * intelligenceControl;
-@property (nonatomic, retain) WYPopoverController *popoverController;
 @property (nonatomic) NSIndexPath *currentRowAtIndexPath;
 @property (nonatomic) NSInteger currentSection;
 @property (strong, nonatomic) IBOutlet UIView *noFocusMessage;
 @property (strong, nonatomic) IBOutlet UIBarButtonItem *toolbarLeftMargin;
 @property (nonatomic, retain) NBNotifier *notifier;
+@property (nonatomic, retain) UIImageView *avatarImageView;
 
 - (void)layoutForInterfaceOrientation:(UIInterfaceOrientation)interfaceOrientation;
 - (void)returnToApp;
@@ -96,9 +91,12 @@ UIActionSheetDelegate> {
 - (void)finishLoadingFeedListWithDict:(NSDictionary *)results finished:(BOOL)finished;
 - (void)finishRefreshingFeedList:(ASIHTTPRequest *)request;
 - (void)didSelectSectionHeader:(UIButton *)button;
+- (void)didSelectSectionHeaderWithTag:(NSInteger)tag;
 - (IBAction)selectIntelligence;
 - (void)markFeedRead:(NSString *)feedId cutoffDays:(NSInteger)days;
 - (void)markFeedsRead:(NSArray *)feedIds cutoffDays:(NSInteger)days;
+- (void)markEverythingReadWithDays:(NSInteger)days;
+- (void)markVisibleStoriesRead;
 - (void)requestFailedMarkStoryRead:(ASIFormDataRequest *)request;
 - (void)finishMarkAllAsRead:(ASIHTTPRequest *)request;
 - (void)didCollapseFolder:(UIButton *)button;

@@ -5,7 +5,7 @@ public class AppConstants {
     // Enables high-volume logging that may be useful for debugging. This should
     // never be enabled for releases, as it not only slows down the app considerably,
     // it will log sensitive info such as passwords!
-    public static final boolean VERBOSE_LOG = false;
+    public static final boolean VERBOSE_LOG = true;
     public static final boolean VERBOSE_LOG_DB = false;
     public static final boolean VERBOSE_LOG_NET = false;
 	
@@ -24,13 +24,13 @@ public class AppConstants {
     public static final String LAST_SYNC_TIME = "LAST_SYNC_TIME";
 
     // how long to wait before auto-syncing the feed/folder list
-    public static final long AUTO_SYNC_TIME_MILLIS = 15L * 60L * 1000L;
+    public static final long AUTO_SYNC_TIME_MILLIS = 20L * 60L * 1000L;
 
     // how often to rebuild the DB
     public static final long VACUUM_TIME_MILLIS = 12L * 60L * 60L * 1000L;
 
     // how often to clean up the DB
-    public static final long CLEANUP_TIME_MILLIS = 1L * 60L * 60L * 1000L;
+    public static final long CLEANUP_TIME_MILLIS = 3L * 60L * 60L * 1000L;
 
     // how often to trigger the BG service. slightly longer than how often we will find new stories,
     // to account for the fact that it is approximate, and missing a cycle is bad.
@@ -40,7 +40,18 @@ public class AppConstants {
     public static final int MAX_API_TRIES = 3;
 
     // the base amount for how long to sleep during exponential API failure backoff
-    public static final long API_BACKOFF_BASE_MILLIS = 500L;
+    public static final long API_BACKOFF_BASE_MILLIS = 750L;
+
+    // for how long to back off from background syncs after a hard API failure
+    public static final long API_BACKGROUND_BACKOFF_MILLIS = 5L * 60L * 1000L;
+
+    // timeouts for API calls, set to something more sane than the default of infinity
+    public static final long API_CONN_TIMEOUT_SECONDS = 60L;
+    public static final long API_READ_TIMEOUT_SECONDS = 120L;
+
+    // timeouts for image prefetching, which are a bit tighter, since they are only for caching
+    public static final long IMAGE_PREFETCH_CONN_TIMEOUT_SECONDS = 10L;
+    public static final long IMAGE_PREFETCH_READ_TIMEOUT_SECONDS = 30L;
 
     // when generating a request for multiple feeds, limit the total number requested to prevent
     // unworkably long URLs
@@ -49,11 +60,8 @@ public class AppConstants {
     // when reading stories, how many stories worth of buffer to keep loaded ahead of the user
     public static final int READING_STORY_PRELOAD = 10;
 
-    // max old stories to keep in the DB per feed before fetching new unreads
-    public static final int MAX_READ_STORIES_STORED = 500;
-
     // how many unread stories to fetch via hash at a time
-    public static final int UNREAD_FETCH_BATCH_SIZE = 100;
+    public static final int UNREAD_FETCH_BATCH_SIZE = 50;
 
     // how many images to prefetch before updating the countdown UI
     public static final int IMAGE_PREFETCH_BATCH_SIZE = 6;

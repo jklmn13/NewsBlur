@@ -61,7 +61,7 @@ public abstract class SubService {
         } finally {
             if (isRunning()) {
                 setRunning(false);
-                NbActivity.updateAllActivities(false);
+                NbActivity.updateAllActivities(NbActivity.UPDATE_STATUS);
             }
         }
     }
@@ -83,11 +83,11 @@ public abstract class SubService {
 
     protected void gotWork() {
         setRunning(true);
-        NbActivity.updateAllActivities(false);
+        NbActivity.updateAllActivities(NbActivity.UPDATE_STATUS);
     }
 
-    protected void gotData() {
-        NbActivity.updateAllActivities(true);
+    protected void gotData(int updateType) {
+        NbActivity.updateAllActivities(updateType);
     }
 
     protected abstract void setRunning(boolean running);
@@ -114,11 +114,13 @@ public abstract class SubService {
         long cooloffTimeMs = Math.round(cooloffTime / 1000000.0);
         if (cooloffTimeMs > AppConstants.DUTY_CYCLE_BACKOFF_CAP_MILLIS) cooloffTimeMs = AppConstants.DUTY_CYCLE_BACKOFF_CAP_MILLIS;
 
-        if (AppConstants.VERBOSE_LOG) Log.d(this.getClass().getName(), "Sleeping for : " + cooloffTimeMs + "ms to enforce max duty cycle.");
-        try {
-            Thread.sleep(cooloffTimeMs);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+        if (NbActivity.getActiveActivityCount() > 0 ) {
+            if (AppConstants.VERBOSE_LOG) Log.d(this.getClass().getName(), "Sleeping for : " + cooloffTimeMs + "ms to enforce max duty cycle.");
+            try {
+                Thread.sleep(cooloffTimeMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 

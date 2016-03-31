@@ -10,7 +10,6 @@ import android.net.Uri;
 import android.support.v4.widget.SwipeRefreshLayout;
 import android.util.Log;
 import android.view.Menu;
-import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.Window;
@@ -29,16 +28,18 @@ import com.newsblur.fragment.FeedIntelligenceSelectorFragment;
 import com.newsblur.fragment.FolderListFragment;
 import com.newsblur.fragment.LoginAsDialogFragment;
 import com.newsblur.fragment.LogoutDialogFragment;
+import com.newsblur.fragment.MarkAllReadDialogFragment.MarkAllReadDialogListener;
 import com.newsblur.service.BootReceiver;
 import com.newsblur.service.NBSyncService;
 import com.newsblur.util.AppConstants;
+import com.newsblur.util.FeedSet;
 import com.newsblur.util.FeedUtils;
 import com.newsblur.util.PrefsUtils;
 import com.newsblur.util.StateFilter;
 import com.newsblur.util.UIUtils;
 import com.newsblur.view.StateToggleButton.StateChangedListener;
 
-public class Main extends NbActivity implements StateChangedListener, SwipeRefreshLayout.OnRefreshListener, AbsListView.OnScrollListener, PopupMenu.OnMenuItemClickListener {
+public class Main extends NbActivity implements StateChangedListener, SwipeRefreshLayout.OnRefreshListener, AbsListView.OnScrollListener, PopupMenu.OnMenuItemClickListener, MarkAllReadDialogListener {
 
 	private FolderListFragment folderFeedList;
 	private FragmentManager fragmentManager;
@@ -56,7 +57,7 @@ public class Main extends NbActivity implements StateChangedListener, SwipeRefre
 
     @Override
 	public void onCreate(Bundle savedInstanceState) {
-        PreferenceManager.setDefaultValues(this, R.layout.activity_settings, false);
+        PreferenceManager.setDefaultValues(this, R.xml.activity_settings, false);
 
         isLightTheme = PrefsUtils.isLightThemeSelected(this);
 
@@ -69,6 +70,11 @@ public class Main extends NbActivity implements StateChangedListener, SwipeRefre
         ButterKnife.bind(this);
 
 		getActionBar().hide();
+
+        // set the status bar to an generic loading message when the activity is first created so
+        // that something is displayed while the service warms up
+        overlayStatusText.setText(R.string.loading);
+        overlayStatusText.setVisibility(View.VISIBLE);
 
         swipeLayout = (SwipeRefreshLayout)findViewById(R.id.swipe_container);
         swipeLayout.setColorScheme(R.color.refresh_1, R.color.refresh_2, R.color.refresh_3, R.color.refresh_4);
@@ -94,14 +100,16 @@ public class Main extends NbActivity implements StateChangedListener, SwipeRefre
     protected void onResume() {
         super.onResume();
 
-        NBSyncService.clearPendingStoryRequest();
+        // immediately clear the story session to prevent bleed-over into the next
+        FeedUtils.clearStorySession();
+        // also queue a clear right before the feedset switches, so no in-flight stoires bleed
+        NBSyncService.resetReadingSession();
+
         NBSyncService.flushRecounts();
-        NBSyncService.setActivationMode(NBSyncService.ActivationMode.ALL);
-        FeedUtils.activateAllStories();
-        FeedUtils.clearReadingSession();
 
         updateStatusIndicators();
         folderFeedList.pushUnreadCounts();
+        folderFeedList.checkOpenFolderPreferences();
         triggerSync();
 
         if (PrefsUtils.isLightThemeSelected(this) != isLightTheme) {
@@ -115,25 +123,33 @@ public class Main extends NbActivity implements StateChangedListener, SwipeRefre
 	}
 	
     @Override
-	public void handleUpdate(boolean freshData) {
-        updateStatusIndicators();
-		if (freshData) folderFeedList.hasUpdated();
+	public void handleUpdate(int updateType) {
+        if ((updateType & UPDATE_REBUILD) != 0) {
+            folderFeedList.reset();
+        }
+        if ((updateType & UPDATE_DB_READY) != 0) {
+            try {
+                folderFeedList.startLoaders();
+            } catch (IllegalStateException ex) {
+                ; // this might be called multiple times, and startLoaders is *not* idempotent
+            }
+        }
+        if ((updateType & UPDATE_STATUS) != 0) {
+            updateStatusIndicators();
+        }
+		if ((updateType & UPDATE_METADATA) != 0) {
+            folderFeedList.hasUpdated();
+        }
 	}
-
-    @Override
-    public void handleUpdateReady() {
-        folderFeedList.startLoaders();
-    }
 
     public void updateUnreadCounts(int neutCount, int posiCount) {
         unreadCountNeutText.setText(Integer.toString(neutCount));
         unreadCountPosiText.setText(Integer.toString(posiCount));
 
         if ((neutCount+posiCount) <= 0) {
-            if (NBSyncService.isFeedCountSyncRunning()) {
+            if (NBSyncService.isFeedCountSyncRunning() || (!folderFeedList.firstCursorSeenYet)) {
                 emptyViewImage.setVisibility(View.INVISIBLE);
-                emptyViewText.setText(R.string.loading);
-                emptyViewText.setVisibility(View.VISIBLE);
+                emptyViewText.setVisibility(View.INVISIBLE);
             } else {
                 emptyViewImage.setVisibility(View.VISIBLE);
                 if (folderFeedList.currentState == StateFilter.BEST) {
@@ -159,6 +175,9 @@ public class Main extends NbActivity implements StateChangedListener, SwipeRefre
         if (overlayStatusText != null) {
             String syncStatus = NBSyncService.getSyncStatusMessage(this, false);
             if (syncStatus != null)  {
+                if (AppConstants.VERBOSE_LOG) {
+                    syncStatus = syncStatus + UIUtils.getMemoryUsageDebug(this);
+                }
                 overlayStatusText.setText(syncStatus);
                 overlayStatusText.setVisibility(View.VISIBLE);
             } else {
@@ -244,6 +263,11 @@ public class Main extends NbActivity implements StateChangedListener, SwipeRefre
         startActivity(i);
     }
 
+    @OnClick(R.id.main_user_image) void onClickUserButton() {
+        Intent i = new Intent(this, Profile.class);
+        startActivity(i);
+    }
+
     @Override
     public void onScrollStateChanged(AbsListView absListView, int i) {
         // not required
@@ -260,4 +284,8 @@ public class Main extends NbActivity implements StateChangedListener, SwipeRefre
         }
     }
 
+    @Override
+    public void onMarkAllRead(FeedSet feedSet) {
+        FeedUtils.markFeedsRead(feedSet, null, null, this);
+    }
 }

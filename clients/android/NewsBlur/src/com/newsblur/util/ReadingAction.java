@@ -2,15 +2,12 @@ package com.newsblur.util;
 
 import android.content.ContentValues;
 import android.database.Cursor;
-import android.text.TextUtils;
 
+import com.newsblur.activity.NbActivity;
 import com.newsblur.database.BlurDatabaseHelper;
 import com.newsblur.database.DatabaseConstants;
 import com.newsblur.network.domain.NewsBlurResponse;
 import com.newsblur.network.APIManager;
-
-import java.util.HashSet;
-import java.util.Set;
 
 public class ReadingAction {
 
@@ -25,6 +22,7 @@ public class ReadingAction {
         UNLIKE_COMMENT
     };
 
+    private final long time;
     private ActionType type;
     private String storyHash;
     private FeedSet feedSet;
@@ -37,7 +35,13 @@ public class ReadingAction {
     private String commentUserId;
 
     private ReadingAction() {
-        ; // must use helpers
+        // note: private - must use helpers
+        this(System.currentTimeMillis());
+    }
+
+    private ReadingAction(long time) {
+        // note: private - must use helpers
+        this.time = time;
     }
 
     public static ReadingAction markStoryRead(String hash) {
@@ -118,7 +122,7 @@ public class ReadingAction {
 
 	public ContentValues toContentValues() {
 		ContentValues values = new ContentValues();
-        values.put(DatabaseConstants.ACTION_TIME, System.currentTimeMillis());
+        values.put(DatabaseConstants.ACTION_TIME, time);
         switch (type) {
 
             case MARK_READ:
@@ -189,7 +193,8 @@ public class ReadingAction {
 	}
 
 	public static ReadingAction fromCursor(Cursor c) {
-		ReadingAction ra = new ReadingAction();
+        long time = c.getLong(c.getColumnIndexOrThrow(DatabaseConstants.ACTION_TIME));
+		ReadingAction ra = new ReadingAction(time);
         if (c.getInt(c.getColumnIndexOrThrow(DatabaseConstants.ACTION_MARK_READ)) == 1) {
             ra.type = ActionType.MARK_READ;
             String hash = c.getString(c.getColumnIndexOrThrow(DatabaseConstants.ACTION_STORY_HASH));
@@ -286,9 +291,12 @@ public class ReadingAction {
     }
 
     /**
-     * Excecute this action on the local DB. These must be idempotent.
+     * Excecute this action on the local DB. These *must* be idempotent.
+     *
+     * @return the union of update impact flags that resulted from this action.
      */
-    public void doLocal(BlurDatabaseHelper dbHelper) {
+    public int doLocal(BlurDatabaseHelper dbHelper) {
+        int impact = 0;
         switch (type) {
 
             case MARK_READ:
@@ -297,40 +305,49 @@ public class ReadingAction {
                 } else if (feedSet != null) {
                     dbHelper.markStoriesRead(feedSet, olderThan, newerThan);
                 }
+                impact |= NbActivity.UPDATE_METADATA;
                 break;
                 
             case MARK_UNREAD:
                 dbHelper.setStoryReadState(storyHash, false);
+                impact |= NbActivity.UPDATE_METADATA;
                 break;
 
             case SAVE:
                 dbHelper.setStoryStarred(storyHash, true);
+                impact |= NbActivity.UPDATE_METADATA;
                 break;
 
             case UNSAVE:
                 dbHelper.setStoryStarred(storyHash, false);
+                impact |= NbActivity.UPDATE_METADATA;
                 break;
 
             case SHARE:
                 dbHelper.setStoryShared(storyHash);
                 dbHelper.insertUpdateComment(storyId, feedId, commentReplyText);
+                impact |= NbActivity.UPDATE_SOCIAL;
                 break;
 
             case LIKE_COMMENT:
                 dbHelper.setCommentLiked(storyId, commentUserId, feedId, true);
+                impact |= NbActivity.UPDATE_SOCIAL;
                 break;
 
             case UNLIKE_COMMENT:
                 dbHelper.setCommentLiked(storyId, commentUserId, feedId, false);
+                impact |= NbActivity.UPDATE_SOCIAL;
                 break;
 
             case REPLY:
-                dbHelper.replyToComment(storyId, feedId, commentUserId, commentReplyText);
+                dbHelper.replyToComment(storyId, feedId, commentUserId, commentReplyText, time);
+                impact |= NbActivity.UPDATE_SOCIAL;
                 break;
 
             default:
                 // not all actions have these, which is fine
         }
+        return impact;
     }
 
 }

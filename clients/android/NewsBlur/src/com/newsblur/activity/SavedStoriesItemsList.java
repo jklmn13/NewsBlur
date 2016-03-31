@@ -4,18 +4,13 @@ import android.os.Bundle;
 import android.app.FragmentTransaction;
 import android.view.Menu;
 import android.view.MenuInflater;
-import android.widget.Toast;
 
 import com.newsblur.R;
 import com.newsblur.fragment.SavedStoriesItemListFragment;
-import com.newsblur.fragment.FeedItemListFragment;
 import com.newsblur.util.DefaultFeedView;
-import com.newsblur.util.FeedSet;
-import com.newsblur.util.FeedUtils;
 import com.newsblur.util.PrefConstants;
 import com.newsblur.util.PrefsUtils;
 import com.newsblur.util.ReadFilter;
-import com.newsblur.util.StoryOrder;
 import com.newsblur.util.UIUtils;
 
 public class SavedStoriesItemsList extends ItemsList {
@@ -24,22 +19,21 @@ public class SavedStoriesItemsList extends ItemsList {
 	protected void onCreate(Bundle bundle) {
 		super.onCreate(bundle);
 
-        UIUtils.setCustomActionBar(this, R.drawable.clock, getResources().getString(R.string.saved_stories_title));
+        String title = getResources().getString(R.string.saved_stories_title);
+        if (fs.getSingleSavedTag() != null) {
+            title = title + " - " + fs.getSingleSavedTag();
+        }
+        UIUtils.setCustomActionBar(this, R.drawable.clock, title);
 
 		itemListFragment = (SavedStoriesItemListFragment) fragmentManager.findFragmentByTag(SavedStoriesItemListFragment.class.getName());
 		if (itemListFragment == null) {
-			itemListFragment = SavedStoriesItemListFragment.newInstance(getDefaultFeedView());
+			itemListFragment = SavedStoriesItemListFragment.newInstance();
 			itemListFragment.setRetainInstance(true);
 			FragmentTransaction listTransaction = fragmentManager.beginTransaction();
 			listTransaction.add(R.id.activity_itemlist_container, itemListFragment, SavedStoriesItemListFragment.class.getName());
 			listTransaction.commit();
 		}
 	}
-
-    @Override
-    protected FeedSet createFeedSet() {
-        return FeedSet.allSaved();
-    }
 
 	@Override
 	public void markItemListAsRead() {
@@ -54,11 +48,6 @@ public class SavedStoriesItemsList extends ItemsList {
 	}
 
     @Override
-    protected DefaultFeedView getDefaultFeedView() {
-        return PrefsUtils.getDefaultFeedViewForFolder(this, PrefConstants.SAVED_STORIES_FOLDER_NAME);
-    }
-
-    @Override
     public void defaultFeedViewChanged(DefaultFeedView value) {
         PrefsUtils.setDefaultFeedViewForFolder(this, PrefConstants.SAVED_STORIES_FOLDER_NAME, value);
         if (itemListFragment != null) {
@@ -66,19 +55,9 @@ public class SavedStoriesItemsList extends ItemsList {
         }
     }
 
-    // Note: the following four methods are required by our parent spec but are not
-    // relevant since saved stories have no read/unread status nor ordering.
+    // Note: the following two methods are required by our parent spec but are not
+    // relevant since saved stories have no read/unread status.
 
-    @Override
-    public StoryOrder getStoryOrder() {
-        return PrefsUtils.getStoryOrderForFolder(this, PrefConstants.ALL_STORIES_FOLDER_NAME);
-    }
-
-    @Override
-    public void updateStoryOrderPreference(StoryOrder newValue) {
-        PrefsUtils.setStoryOrderForFolder(this, PrefConstants.ALL_STORIES_FOLDER_NAME, newValue);
-    }
-    
     @Override
     protected void updateReadFilterPreference(ReadFilter newValue) {
         PrefsUtils.setReadFilterForFolder(this, PrefConstants.ALL_STORIES_FOLDER_NAME, newValue);

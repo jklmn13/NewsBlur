@@ -11,7 +11,6 @@
 #import "ASIHTTPRequest.h"
 #import "BaseViewController.h"
 #import "Utilities.h"
-#import "WYPopoverController.h"
 #import "NBNotifier.h"
 #import "MCSwipeTableViewCell.h"
 
@@ -20,10 +19,9 @@
 @class MCSwipeTableViewCell;
 
 @interface FeedDetailViewController : BaseViewController 
-<UITableViewDelegate, UITableViewDataSource, 
- UIActionSheetDelegate, UIAlertViewDelegate,
+<UITableViewDelegate, UITableViewDataSource, UIAlertViewDelegate,
  UIPopoverControllerDelegate, ASIHTTPRequestDelegate,
- WYPopoverControllerDelegate, MCSwipeTableViewCellDelegate,
+ MCSwipeTableViewCellDelegate,
  UIGestureRecognizerDelegate, UISearchBarDelegate> {
     NewsBlurAppDelegate *appDelegate;
     
@@ -38,7 +36,6 @@
      
     UITableView * storyTitlesTable;
     UIBarButtonItem * feedMarkReadButton;
-    WYPopoverController *popoverController;
     Class popoverClass;
     NBNotifier *notifier;
 }
@@ -51,10 +48,11 @@
 @property (nonatomic) IBOutlet UIBarButtonItem * spacer2BarButton;
 @property (nonatomic) IBOutlet UIBarButtonItem * separatorBarButton;
 @property (nonatomic) IBOutlet UIBarButtonItem * titleImageBarButton;
-@property (nonatomic, retain) WYPopoverController *popoverController;
 @property (nonatomic, retain) NBNotifier *notifier;
 @property (nonatomic, retain) StoriesCollection *storiesCollection;
 @property (nonatomic) UISearchBar *searchBar;
+@property (nonatomic) IBOutlet UIView *messageView;
+@property (nonatomic) IBOutlet UILabel *messageLabel;
 
 @property (nonatomic, readwrite) BOOL pageFetching;
 @property (nonatomic, readwrite) BOOL pageFinished;
@@ -91,11 +89,13 @@
 - (void)fadeSelectedCell:(BOOL)deselect;
 - (void)loadStory:(FeedDetailTableCell *)cell atRow:(NSInteger)row;
 - (void)redrawUnreadStory;
-- (IBAction)doOpenMarkReadActionSheet:(id)sender;
-- (IBAction)doOpenSettingsActionSheet:(id)sender;
+- (IBAction)doOpenMarkReadMenu:(id)sender;
+- (IBAction)doOpenSettingsMenu:(id)sender;
 - (void)confirmDeleteSite;
+- (void)confirmMuteSite;
 - (void)deleteSite;
 - (void)deleteFolder;
+- (void)muteSite;
 - (void)openMoveView;
 - (void)openTrainSite;
 - (void)openRenameSite;
@@ -104,10 +104,9 @@
 - (void)instafetchFeed;
 - (void)changeActiveStoryTitleCellLayout;
 - (void)loadFaviconsFromActiveFeed;
+- (void)markFeedsReadFromTimestamp:(NSInteger)cutoffTimestamp andOlder:(BOOL)older;
 - (void)saveAndDrawFavicons:(ASIHTTPRequest *)request;
 - (void)requestFailed:(ASIHTTPRequest *)request;
-- (void)requestFailedMarkStoryRead:(ASIFormDataRequest *)request;
-- (void)finishMarkAllAsRead:(ASIHTTPRequest *)request;
 - (void)finishMarkAsSaved:(ASIFormDataRequest *)request;
 - (void)failedMarkAsSaved:(ASIFormDataRequest *)request;
 - (void)finishMarkAsUnsaved:(ASIFormDataRequest *)request;

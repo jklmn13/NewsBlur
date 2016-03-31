@@ -48,6 +48,7 @@
     NSString *collapseKey = [NSString stringWithFormat:@"folderCollapsed:%@", folderName];
     bool isFolderCollapsed = [userPreferences boolForKey:collapseKey];
     int countWidth = 0;
+    NSString *accessibilityCount = @"";
     
     if ([folderName isEqual:@"saved_stories"]) {
         unreadCount = [[UnreadCountView alloc] initWithFrame:CGRectInset(rect, 0, 2)];
@@ -59,6 +60,8 @@
         [unreadCount calculateOffsets:appDelegate.savedStoriesCount nt:0];
         countWidth = [unreadCount offsetWidth];
         [self addSubview:unreadCount];
+        
+        accessibilityCount = [NSString stringWithFormat:@", %@ stories", @(appDelegate.savedStoriesCount)];
     } else if (isFolderCollapsed) {
         UnreadCounts *counts = [appDelegate splitUnreadCountForFolder:folderName];
         unreadCount = [[UnreadCountView alloc] initWithFrame:CGRectInset(rect, 0, 2)];
@@ -70,20 +73,27 @@
         [unreadCount calculateOffsets:counts.ps nt:counts.nt];
         countWidth = [unreadCount offsetWidth];
         [self addSubview:unreadCount];
+        
+        accessibilityCount = [NSString stringWithFormat:@", collapsed, %@ unread stories", @(counts.nt)];
+    } else if (UIAccessibilityIsVoiceOverRunning()) {
+        UnreadCounts *counts = [appDelegate splitUnreadCountForFolder:folderName];
+        
+        accessibilityCount = [NSString stringWithFormat:@", %@ unread stories", @(counts.nt)];
     }
+    
     // create the parent view that will hold header Label
     UIView* customView = [[UIView alloc] initWithFrame:rect];
 
     // Background
     [NewsBlurAppDelegate fillGradient:rect
-                           startColor:UIColorFromRGB(0xEAECE5)
-                             endColor:UIColorFromRGB(0xDCDFD6)];
+                           startColor:UIColorFromLightSepiaMediumDarkRGB(0xEAECE5, 0xffffc6, 0x6A6A6A, 0x444444)
+                             endColor:UIColorFromLightSepiaMediumDarkRGB(0xDCDFD6, 0xffffc0, 0x666666, 0x333333)];
 //    UIColor *backgroundColor = UIColorFromRGB(0xD7DDE6);
 //    [backgroundColor set];
 //    CGContextFillRect(context, rect);
     
     // Borders
-    UIColor *topColor = UIColorFromRGB(0xFDFDFD);
+    UIColor *topColor = UIColorFromLightSepiaMediumDarkRGB(0xFDFDFD, 0xFDFDF6, 0x878B8A, 0x474B4A);
     CGContextSetStrokeColor(context, CGColorGetComponents([topColor CGColor]));
     
     CGContextBeginPath(context);
@@ -92,7 +102,7 @@
     CGContextStrokePath(context);
     
     // bottom border
-    UIColor *bottomColor = UIColorFromRGB(0xB7BBAA);
+    UIColor *bottomColor = UIColorFromLightSepiaMediumDarkRGB(0xB7BBAA, 0xe0e0a6, 0x404040, 0x0D0D0D);
     CGContextSetStrokeColor(context, CGColorGetComponents([bottomColor CGColor]));
     CGContextBeginPath(context);
     CGContextMoveToPoint(context, 0, rect.size.height-0.25f);
@@ -100,7 +110,7 @@
     CGContextStrokePath(context);
     
     // Folder title
-    UIColor *textColor = [UIColor colorWithRed:0.3 green:0.3 blue:0.3 alpha:1.0];
+    UIColor *textColor = UIColorFromRGB(0x4C4D4A);
     UIFontDescriptor *boldFontDescriptor = [self fontDescriptorUsingPreferredSize:UIFontTextStyleCaption1];
     UIFont *font = [UIFont fontWithDescriptor: boldFontDescriptor size:0.0];
     NSInteger titleOffsetY = ((rect.size.height - font.pointSize) / 2) - 1;
@@ -134,6 +144,8 @@
     invisibleHeaderButton.frame = CGRectMake(0, 0, customView.frame.size.width, customView.frame.size.height);
     invisibleHeaderButton.alpha = .1;
     invisibleHeaderButton.tag = section;
+    invisibleHeaderButton.accessibilityLabel = [NSString stringWithFormat:@"%@ folder%@", folderTitle, accessibilityCount];
+    invisibleHeaderButton.accessibilityTraits = UIAccessibilityTraitNone;
     [invisibleHeaderButton addTarget:appDelegate.feedsViewController
                               action:@selector(didSelectSectionHeader:)
                     forControlEvents:UIControlEventTouchUpInside];
@@ -171,7 +183,14 @@
             disclosureButton.tag = section;
             [disclosureButton addTarget:appDelegate.feedsViewController action:@selector(didCollapseFolder:) forControlEvents:UIControlEventTouchUpInside];
 
-            UIImage *disclosureBorder = [UIImage imageNamed:@"disclosure_border.png"];
+            UIImage *disclosureBorder = [UIImage imageNamed:@"disclosure_border"];
+            if ([[[ThemeManager themeManager] theme] isEqualToString:ThemeStyleSepia]) {
+                disclosureBorder = [UIImage imageNamed:@"disclosure_border_sepia"];
+            } else if ([[[ThemeManager themeManager] theme] isEqualToString:ThemeStyleMedium]) {
+                disclosureBorder = [UIImage imageNamed:@"disclosure_border_medium"];
+            } else if ([[[ThemeManager themeManager] theme] isEqualToString:ThemeStyleDark]) {
+                disclosureBorder = [UIImage imageNamed:@"disclosure_border_dark"];
+            }
             [disclosureBorder drawInRect:CGRectMake(customView.frame.size.width - 32, 3, 29, 29)];
         } else {
             // Everything/Saved folder doesn't get a button
@@ -207,6 +226,7 @@
         } else {
             folderImageViewX = 7;
         }
+        allowLongPress = YES;
     } else if ([folderName isEqual:@"saved_stories"]) {
         folderImage = [UIImage imageNamed:@"clock.png"];
         if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
@@ -267,9 +287,9 @@
         } else if ([[userPreferences stringForKey:@"feed_list_font_size"] isEqualToString:@"medium"]) {
             fontDescriptorSize = [fontDescriptorSize fontDescriptorWithSize:12.0f];
         } else if ([[userPreferences stringForKey:@"feed_list_font_size"] isEqualToString:@"large"]) {
-            fontDescriptorSize = [fontDescriptorSize fontDescriptorWithSize:14.0f];
+            fontDescriptorSize = [fontDescriptorSize fontDescriptorWithSize:15.0f];
         } else if ([[userPreferences stringForKey:@"feed_list_font_size"] isEqualToString:@"xl"]) {
-            fontDescriptorSize = [fontDescriptorSize fontDescriptorWithSize:16.0f];
+            fontDescriptorSize = [fontDescriptorSize fontDescriptorWithSize:17.0f];
         }
     }
     
@@ -279,49 +299,20 @@
 - (void)handleLongPress:(UILongPressGestureRecognizer *)gestureRecognizer {
     if (gestureRecognizer.state != UIGestureRecognizerStateBegan) return;
     if (section < 2) return;
+    
     NSUserDefaults *preferences = [NSUserDefaults standardUserDefaults];
     NSString *longPressTitle = [preferences stringForKey:@"long_press_feed_title"];
-
     NSString *folderTitle = [appDelegate.dictFoldersArray objectAtIndex:section];
-    NSArray *feedIds = [appDelegate.dictFolders objectForKey:folderTitle];
-
+    NSArray *feedIds = [self.appDelegate feedIdsForFolderTitle:folderTitle];
+    NSString *collectionTitle = [folderTitle isEqual:@"everything"] ? @"everything" : @"entire folder";
+    
     if ([longPressTitle isEqualToString:@"mark_read_choose_days"]) {
-        UIActionSheet *markReadSheet = [[UIActionSheet alloc] initWithTitle:folderTitle
-                                                                   delegate:self
-                                                          cancelButtonTitle:@"Cancel"
-                                                     destructiveButtonTitle:@"Mark folder as read"
-                                                          otherButtonTitles:@"1 day", @"3 days", @"7 days", @"14 days", nil];
-        markReadSheet.accessibilityValue = folderTitle;
-        [markReadSheet showInView:appDelegate.feedsViewController.view];
+        [self.appDelegate showMarkReadMenuWithFeedIds:feedIds collectionTitle:collectionTitle sourceView:self sourceRect:self.bounds completionHandler:^(BOOL marked){
+            [appDelegate.feedsViewController sectionUntappedOutside:invisibleHeaderButton];
+        }];
     } else if ([longPressTitle isEqualToString:@"mark_read_immediate"]) {
         [appDelegate.feedsViewController markFeedsRead:feedIds cutoffDays:0];
     }
 }
-
-- (void)actionSheet:(UIActionSheet *)actionSheet clickedButtonAtIndex:(NSInteger)buttonIndex {
-    NSString *folderTitle = actionSheet.accessibilityValue;
-    NSArray *feedIds = [appDelegate.dictFolders objectForKey:folderTitle];
-
-    switch (buttonIndex) {
-        case 0:
-            [appDelegate.feedsViewController markFeedsRead:feedIds cutoffDays:0];
-            break;
-        case 1:
-            [appDelegate.feedsViewController markFeedsRead:feedIds cutoffDays:1];
-            break;
-        case 2:
-            [appDelegate.feedsViewController markFeedsRead:feedIds cutoffDays:3];
-            break;
-        case 3:
-            [appDelegate.feedsViewController markFeedsRead:feedIds cutoffDays:7];
-            break;
-        case 4:
-            [appDelegate.feedsViewController markFeedsRead:feedIds cutoffDays:14];
-            break;
-    }
-    
-    [appDelegate.feedsViewController sectionUntappedOutside:invisibleHeaderButton];
-}
-
 
 @end

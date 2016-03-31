@@ -1,8 +1,5 @@
 package com.newsblur.database;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import android.content.Context;
 import android.database.Cursor;
 import android.graphics.Color;
@@ -13,23 +10,18 @@ import android.widget.ImageView;
 import android.widget.TextView;
 
 import com.newsblur.R;
-import com.newsblur.activity.NewsBlurApplication;
 import com.newsblur.domain.Story;
-import com.newsblur.util.ImageLoader;
+import com.newsblur.util.FeedUtils;
 import com.newsblur.util.PrefsUtils;
 import com.newsblur.util.ThemeUtils;
 
 public class MultipleFeedItemsAdapter extends StoryItemsAdapter {
 
-	private Cursor cursor;
-	private ImageLoader imageLoader;
 	private int storyTitleUnread, storyContentUnread, storyAuthorUnread, storyTitleRead, storyContentRead, storyAuthorRead, storyDateUnread, storyDateRead, storyFeedUnread, storyFeedRead;
     private boolean ignoreReadStatus;
 
 	public MultipleFeedItemsAdapter(Context context, int layout, Cursor c, String[] from, int[] to, boolean ignoreReadStatus) {
 		super(context, layout, c, from, to);
-		imageLoader = ((NewsBlurApplication) context.getApplicationContext()).getImageLoader();
-		this.cursor = c;
 
         storyTitleUnread = ThemeUtils.getStoryTitleUnreadColor(context);
         storyTitleRead = ThemeUtils.getStoryTitleReadColor(context);
@@ -50,18 +42,7 @@ public class MultipleFeedItemsAdapter extends StoryItemsAdapter {
     }
 
 	@Override
-	public int getCount() {
-		return cursor.getCount();
-	}
-
-	@Override
-	public Cursor swapCursor(Cursor c) {
-		this.cursor = c;
-		return super.swapCursor(c);
-	}
-
-	@Override
-	public void bindView(View v, Context context, Cursor cursor) {
+	public void bindView(final View v, Context context, Cursor cursor) {
         super.bindView(v, context, cursor);
         
 		View borderOne = v.findViewById(R.id.row_item_favicon_borderbar_1);
@@ -71,7 +52,7 @@ public class MultipleFeedItemsAdapter extends StoryItemsAdapter {
         String feedFade = cursor.getString(cursor.getColumnIndex(DatabaseConstants.FEED_FAVICON_COLOR));
 
 		String faviconUrl = cursor.getString(cursor.getColumnIndex(DatabaseConstants.FEED_FAVICON_URL));
-		imageLoader.displayImage(faviconUrl, ((ImageView) v.findViewById(R.id.row_item_feedicon)), false);
+		FeedUtils.imageLoader.displayImage(faviconUrl, ((ImageView) v.findViewById(R.id.row_item_feedicon)), false);
 
 		if (!TextUtils.equals(feedColor, "#null") && !TextUtils.equals(feedFade, "#null")) {
 			borderOne.setBackgroundColor(Color.parseColor(feedColor));
@@ -81,7 +62,9 @@ public class MultipleFeedItemsAdapter extends StoryItemsAdapter {
 			borderTwo.setBackgroundColor(Color.LTGRAY);
 		}
 		
-		if (this.ignoreReadStatus || (! Story.fromCursor(cursor).read)) {
+        Story story = Story.fromCursor(cursor);
+
+		if (this.ignoreReadStatus || (! story.read)) {
 			((TextView) v.findViewById(R.id.row_item_author)).setTextColor(storyAuthorUnread);
 			((TextView) v.findViewById(R.id.row_item_date)).setTextColor(storyDateUnread);
 			((TextView) v.findViewById(R.id.row_item_feedtitle)).setTextColor(storyFeedUnread);
@@ -114,15 +97,15 @@ public class MultipleFeedItemsAdapter extends StoryItemsAdapter {
 			borderTwo.getBackground().setAlpha(125);
 		}
 
+        if (story.starred) {
+            v.findViewById(R.id.row_item_saved_icon).setVisibility(View.VISIBLE);
+        } else {
+            v.findViewById(R.id.row_item_saved_icon).setVisibility(View.GONE);
+        }
+
         if (!PrefsUtils.isShowContentPreviews(context)) {
             v.findViewById(R.id.row_item_content).setVisibility(View.GONE);
         }
 	}
 	
-	@Override
-	public Story getStory(int position) {
-        cursor.moveToPosition(position);
-        return Story.fromCursor(cursor);
-    }
-
 }
